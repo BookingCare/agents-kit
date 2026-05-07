@@ -1,0 +1,18 @@
+node_modules
+dist
+.turbo
+.next
+*.tsbuildinfo
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
