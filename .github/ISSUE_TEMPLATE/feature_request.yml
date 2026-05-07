@@ -1,0 +1,44 @@
+name: Feature Request
+description: Propose a new feature or enhancement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before you start:** Read [CONTRIBUTING.md](https://github.com/BookingCare/agents-kit/blob/main/CONTRIBUTING.md).
+
+        Feature requests go through a spec flow. A maintainer will apply `ready-to-spec` when the problem is understood. Do not open a code PR until the issue has a readiness label.
+
+        Describe the **problem** first, not the solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Who experiences it, and what's the pain point?
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: Current behavior
+      description: How does it work today? Why does it fall short?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Desired behavior
+      description: A sketch of the desired workflow or behavior. Mocks welcome but not required.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Constraints, related features, prior art, etc.
+    validations:
+      required: false
