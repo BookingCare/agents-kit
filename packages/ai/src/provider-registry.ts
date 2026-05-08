@@ -1,24 +1,22 @@
-import type { AssistantMessageEventStream, StreamOptions } from "./types.js";
+import type { Api, ProviderApi } from "./types.js";
 
-type StreamFn = (options: StreamOptions) => AssistantMessageEventStream;
+const providers = new Map<string, ProviderApi>();
 
-const providers = new Map<string, StreamFn>();
-
-export function registerProvider(name: string, streamFn: StreamFn): void {
-  providers.set(name, streamFn);
+export function registerProvider(api: string, provider: ProviderApi): void {
+  providers.set(api, provider);
 }
 
-export function getProviderStreamFn(name: string): StreamFn {
-  const fn = providers.get(name);
-  if (!fn) {
+export function resolveApiProvider(api: Api): ProviderApi {
+  const provider = providers.get(api);
+  if (!provider) {
     const available = [...providers.keys()];
     throw new Error(
-      `Unknown provider: "${name}". Available providers: ${available.length ? available.join(", ") : "none"}`,
+      `No provider registered for API: "${api}". Available APIs: ${available.length ? available.join(", ") : "none"}`,
     );
   }
-  return fn;
+  return provider;
 }
 
-export function listProviders(): string[] {
+export function listApis(): string[] {
   return [...providers.keys()];
 }

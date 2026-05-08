@@ -74,6 +74,19 @@ export interface ToolCallDeltaEvent {
   arguments: string;
 }
 
+export interface ToolCallParsedEvent {
+  type: "tool_call_parsed";
+  index: number;
+  /** Tool call ID */
+  id: string;
+  /** Tool name */
+  name: string;
+  /** Partially or fully parsed arguments object */
+  arguments: Record<string, unknown>;
+  /** Whether the arguments are complete */
+  isComplete: boolean;
+}
+
 export interface ThinkingEvent {
   type: "thinking";
   content: string;
@@ -103,6 +116,7 @@ export interface StopEvent {
 export type StreamEvent =
   | TextEvent
   | ToolCallDeltaEvent
+  | ToolCallParsedEvent
   | ThinkingEvent
   | UsageEvent
   | StopEvent;
@@ -146,18 +160,24 @@ export interface Model<TApi extends Api> {
 }
 
 // === API Types ===
-
-export type Api =
+export type KnownApi = 
+  | "azure-openai-responses"
   | "azure-openai-completions"
   | "openai-completions"
   | "openai-responses"
   | "anthropic-messages";
 
+
+export type Api = KnownApi | (string & {});
+
 // === Provider ===
 
 export type Provider = string;
 
-export type knownProvider = "azure-openai" | "openai" | "anthropic";
+export type knownProvider = 
+  | "azure-openai" 
+  | "openai" 
+  | "anthropic";
 
 // === Thinking Level Map ===
 
@@ -196,20 +216,129 @@ export interface AnthropicMessagesCompat {
   headers?: Record<string, string>;
 }
 
+// === Transport & Request Types ===
+
+/** Preferred transport for providers that support multiple transports. */
+export type Transport = "sse" | "websocket" | (string & {});
+
+/** Prompt cache retention preference. Providers map this to their supported values. */
+export type CacheRetention = "short" | "medium" | "long";
+
+/** HTTP response metadata passed to onResponse callbacks. */
+export interface ProviderResponse {
+  status: number;
+  headers: Record<string, string>;
+  url: string;
+}
+
+/** Conversation context: messages and available tools. */
+export interface Context {
+  messages: Message[];
+  tools?: ToolDefinition[];
+}
+
+/** Base stream options — transport-level and request control. */
+export interface StreamOptions {
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
+  stopSequences?: string[];
+  signal?: AbortSignal;
+  apiKey?: string;
+  /**
+   * Preferred transport for providers that support multiple transports.
+   * Providers that do not support this option ignore it.
+   */
+  transport?: Transport;
+  /**
+   * Prompt cache retention preference. Providers map this to their supported values.
+   * Default: "short".
+   */
+  cacheRetention?: CacheRetention;
+  /**
+   * Optional session identifier for providers that support session-based caching.
+   * Providers can use this to enable prompt caching, request routing, or other
+   * session-aware features. Ignored by providers that don't support it.
+   */
+  sessionId?: string;
+  /**
+   * Optional callback for inspecting or replacing provider payloads before sending.
+   * Return undefined to keep the payload unchanged.
+   */
+  onPayload?: (payload: unknown, model: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
+  /**
+   * Optional callback invoked after an HTTP response is received and before
+   * its body stream is consumed.
+   */
+  onResponse?: (response: ProviderResponse, model: Model<Api>) => void | Promise<void>;
+  /**
+   * Optional custom HTTP headers to include in API requests.
+   * Merged with provider defaults; can override default headers.
+   * Not supported by all providers (e.g., AWS Bedrock uses SDK auth).
+   */
+  headers?: Record<string, string>;
+  /**
+   * HTTP request timeout in milliseconds for providers/SDKs that support it.
+   * For example, OpenAI and Anthropic SDK clients default to 10 minutes.
+   */
+  timeoutMs?: number;
+  /**
+   * Maximum retry attempts for providers/SDKs that support client-side retries.
+   * For example, OpenAI and Anthropic SDK clients default to 2.
+   */
+  maxRetries?: number;
+  /**
+   * Maximum delay in milliseconds to wait for a retry when the server requests a long wait.
+   * If the server's requested delay exceeds this value, the request fails immediately
+   * with an error containing the requested delay, allowing higher-level retry logic
+   * to handle it with user visibility.
+   * Default: 60000 (60 seconds). Set to 0 to disable the cap.
+   */
+  maxRetryDelayMs?: number;
+  /**
+   * Optional metadata to include in API requests.
+   * Providers extract the fields they understand and ignore the rest.
+   * For example, Anthropic uses `user_id` for abuse tracking and rate limiting.
+   */
+  metadata?: Record<string, unknown>;
+}
+
+/** Provider-extensible stream options. */
+export type ProviderStreamOptions = StreamOptions & Record<string, unknown>;
+
+/**
+ * A provider implementation for a specific API.
+ * Registered by API type and resolved via `resolveApiProvider(model.api)`.
+ */
+export interface ProviderApi {
+  /** Stream a completion, yielding standardized events. */
+  stream<TApi extends Api>(
+    model: Model<TApi>,
+    context: Context,
+    options?: StreamOptions,
+  ): AssistantMessageEventStream;
+
+  /** Stream a simple completion (prompt-in, stream-out). */
+  streamSimple<TApi extends Api>(
+    model: Model<TApi>,
+    context: Context,
+    options?: StreamOptions,
+  ): AssistantMessageEventStream;
+}
+
+// === Provider-Specific Options ===
+
 export interface AzureOpenAIStreamOptions extends StreamOptions {
   endpoint: string;
-  apiKey: string;
   apiVersion?: string;
 }
 
 export interface OpenAIStreamOptions extends StreamOptions {
   baseUrl: string;
-  apiKey: string;
 }
 
 export interface AnthropicStreamOptions extends StreamOptions {
   baseUrl: string;
-  apiKey: string;
 }
 
 export interface ApiOptionsMap {
@@ -219,27 +348,10 @@ export interface ApiOptionsMap {
   "anthropic-messages": AnthropicStreamOptions;
 }
 
-// === Stream Options ===
+// === Convenience Options ===
 
-export interface StreamOptions {
-  model: string;
-  messages: Message[];
-  tools?: ToolDefinition[];
-  temperature?: number;
-  maxTokens?: number;
-  topP?: number;
-  stopSequences?: string[];
-  abortSignal?: AbortSignal;
-}
-
-export interface SimpleStreamOptions {
-  model: string;
-  prompt: string;
-  system?: string;
-  tools?: ToolDefinition[];
-  temperature?: number;
-  maxTokens?: number;
-}
+/** Options for the simple prompt-in stream-out API. */
+export interface SimpleStreamOptions extends StreamOptions {}
 
 // === Stream Result ===
 

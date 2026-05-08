@@ -9,6 +9,7 @@ import type {
   AssistantMessageEventStream,
   ContentPart,
   Message,
+  Model,
   StopReason,
   StreamEvent,
   StreamOptions,
@@ -16,9 +17,12 @@ import type {
   ToolDefinition,
   ToolResultMessage,
   UserMessage,
+  Api,
+  Context,
+  ProviderApi,
 } from "../types.js";
-import { detectAzureOpenAIConfig } from "../env-api-keys.js";
-import { AIError } from "../error.js";
+import { detectAzureOpenAIConfig } from "../utils/env-api-keys.js";
+import { AIError } from "../utils/error.js";
 
 /**
  * Cached Azure OpenAI client.
@@ -178,25 +182,29 @@ function parseChunk(chunk: ChatCompletionChunk): StreamEvent[] {
   return events;
 }
 
-export async function* streamAzureOpenAI(options: StreamOptions): AssistantMessageEventStream {
+async function* streamAzureOpenAI<TApi extends Api>(
+  model: Model<TApi>,
+  context: Context,
+  options?: StreamOptions,
+): AssistantMessageEventStream {
   const client = getClient();
 
   const createParams = {
-    model: options.model,
-    messages: convertMessages(options.messages),
+    model: model.id,
+    messages: convertMessages(context.messages),
     stream: true as const,
     stream_options: { include_usage: true as const },
-    ...(options.tools?.length && { tools: convertTools(options.tools) }),
-    ...(options.temperature !== undefined && { temperature: options.temperature }),
-    ...(options.maxTokens !== undefined && { max_output_tokens: options.maxTokens }),
-    ...(options.topP !== undefined && { top_p: options.topP }),
-    ...(options.stopSequences?.length && { stop: options.stopSequences }),
+    ...(context.tools?.length && { tools: convertTools(context.tools) }),
+    ...(options?.temperature !== undefined && { temperature: options.temperature }),
+    ...(options?.maxTokens !== undefined && { max_output_tokens: options.maxTokens }),
+    ...(options?.topP !== undefined && { top_p: options.topP }),
+    ...(options?.stopSequences?.length && { stop: options.stopSequences }),
   };
 
   let stream: AsyncIterable<ChatCompletionChunk>;
   try {
     const response = await client.chat.completions.create(createParams, {
-      signal: options.abortSignal,
+      signal: options?.signal,
     });
     // The SDK returns Stream<ChatCompletionChunk> when stream: true
     stream = response as AsyncIterable<ChatCompletionChunk>;
@@ -215,6 +223,7 @@ export async function* streamAzureOpenAI(options: StreamOptions): AssistantMessa
   }
 }
 
-export function createAzureOpenAIStreamFn() {
-  return streamAzureOpenAI;
-}
+export const azureOpenAIProvider: ProviderApi = {
+  stream: streamAzureOpenAI,
+  streamSimple: streamAzureOpenAI,
+};

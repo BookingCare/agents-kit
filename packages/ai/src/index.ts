@@ -12,6 +12,7 @@ export type {
   ToolCall,
   TextEvent,
   ToolCallDeltaEvent,
+  ToolCallParsedEvent,
   ThinkingEvent,
   UsageEvent,
   StopReason,
@@ -26,11 +27,17 @@ export type {
   OpenAICompletionsCompat,
   OpenAIResponsesCompat,
   AnthropicMessagesCompat,
+  Transport,
+  CacheRetention,
+  ProviderResponse,
+  Context,
+  ProviderApi,
   AzureOpenAIStreamOptions,
   OpenAIStreamOptions,
   AnthropicStreamOptions,
   ApiOptionsMap,
   StreamOptions,
+  ProviderStreamOptions,
   SimpleStreamOptions,
   Usage,
   Cost,
@@ -38,19 +45,19 @@ export type {
 } from "./types.js";
 
 // Error
-export { AIError } from "./error.js";
+export { AIError } from "./utils/error.js";
 
 // Model discovery
 export { getModel, listModels, getModelsByProvider } from "./models.generated.js";
 
 // Provider registry
-export { registerProvider, listProviders } from "./provider-registry.js";
+export { registerProvider, listApis } from "./provider-registry.js";
 
 // Cost calculation
-export { calculateCost } from "./costs.js";
+export { calculateCost } from "./utils/costs.js";
 
 // Stream functions
-export { stream, collectStream, streamSimple } from "./stream.js";
+export { stream, collectStream, streamSimple, withParsedToolCalls } from "./stream.js";
 
 // Tool builder
 export { tool } from "./tool.js";

@@ -1,14 +1,17 @@
 import type {
   AssistantMessageEventStream,
   ContentPart,
+  Context,
   Message,
+  Model,
+  Api,
   StreamResult,
+  ToolDefinition,
   Usage,
   Cost,
 } from "./types.js";
 import { collectStream } from "./stream.js";
-import { getModel } from "./models.generated.js";
-import { calculateCost } from "./costs.js";
+import { calculateCost } from "./utils/costs.js";
 
 export interface ConversationJSON {
   messages: Message[];
@@ -56,9 +59,9 @@ export class Conversation {
    */
   async addAssistantResponse(
     eventStream: AssistantMessageEventStream,
-    modelId?: string,
+    model?: Model<Api>,
   ): Promise<StreamResult> {
-    const result = await collectStream(eventStream, modelId);
+    const result = await collectStream(eventStream, model);
 
     const assistantMsg: Message = { role: "assistant" };
     if (result.text) {
@@ -87,15 +90,18 @@ export class Conversation {
     return [...this.messages];
   }
 
+  /** Get as a Context object for passing to stream/streamSimple. */
+  toContext(tools?: ToolDefinition[]): Context {
+    return { messages: [...this.messages], tools };
+  }
+
   /** Get accumulated token usage */
   get totalUsage(): Usage {
     return { ...this._totalUsage };
   }
 
   /** Calculate total cost based on a specific model's pricing */
-  getTotalCost(modelId: string): Cost | undefined {
-    const model = getModel(modelId);
-    if (!model) return undefined;
+  getTotalCost(model: Model<Api>): Cost {
     return calculateCost(this._totalUsage, model);
   }
 

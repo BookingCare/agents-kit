@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { stream, collectStream, streamSimple } from "../src/stream.js";
+import { stream, collectStream, streamSimple, withParsedToolCalls } from "../src/stream.js";
 import { Conversation } from "../src/context.js";
 import { getModel, listModels, getModelsByProvider } from "../src/models.generated.js";
-import { calculateCost } from "../src/costs.js";
-import { listProviders } from "../src/provider-registry.js";
-import { AIError } from "../src/error.js";
-import type { Model, Usage, StreamEvent } from "../src/types.js";
+import { calculateCost } from "../src/utils/costs.js";
+import { listApis } from "../src/provider-registry.js";
+import { AIError } from "../src/utils/error.js";
+import type { Model, Usage, StreamEvent, Context } from "../src/types.js";
 import { _resetClient } from "../src/providers/azure-openai.js";
 
 // === Helpers to build mock ChatCompletionChunk objects ===
@@ -169,24 +169,22 @@ describe("Cost Calculation", () => {
 });
 
 describe("Provider Registry", () => {
-  it("has azure-openai registered", () => {
-    const providers = listProviders();
-    expect(providers).toContain("azure-openai");
+  it("has azure-openai-completions API registered", () => {
+    const apis = listApis();
+    expect(apis).toContain("azure-openai-completions");
   });
 });
 
 describe("Azure OpenAI Provider", () => {
+  const gpt4o = () => getModel("gpt-4o")!;
+
   it("streams text events", async () => {
     mockCreate.mockResolvedValue(
       mockStream([makeTextDelta("Hello"), makeTextDelta(" world"), makeFinishChunk("stop"), makeUsageChunk(10, 5)]),
     );
 
-    const events = stream({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: "Hi" }],
-    });
-
-    const result = await collectStream(events, "gpt-4o");
+    const events = stream(gpt4o(), { messages: [{ role: "user", content: "Hi" }] });
+    const result = await collectStream(events, gpt4o());
 
     expect(result.text).toBe("Hello world");
     expect(result.usage.inputTokens).toBe(10);
@@ -213,13 +211,12 @@ describe("Azure OpenAI Provider", () => {
       ]),
     );
 
-    const events = stream({
-      model: "gpt-4o",
+    const events = stream(gpt4o(), {
       messages: [{ role: "user", content: "Weather in Tokyo?" }],
       tools: [{ name: "get_weather", parameters: { type: "object" } }],
     });
 
-    const result = await collectStream(events, "gpt-4o");
+    const result = await collectStream(events, gpt4o());
 
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0].id).toBe("call_1");
@@ -228,13 +225,52 @@ describe("Azure OpenAI Provider", () => {
     expect(result.stopReason).toBe("tool_use");
   });
 
+  it("emits parsed tool call events with partial JSON", async () => {
+    mockCreate.mockResolvedValue(
+      mockStream([
+        makeToolCallDelta(0, { id: "call_1", name: "get_weather", arguments: '{"ci' }),
+        makeToolCallDelta(0, { arguments: 'ty":' }),
+        makeToolCallDelta(0, { arguments: '"Tokyo"}' }),
+        makeFinishChunk("tool_calls"),
+        makeUsageChunk(20, 15),
+      ]),
+    );
+
+    const events = stream(gpt4o(), {
+      messages: [{ role: "user", content: "Weather in Tokyo?" }],
+      tools: [{ name: "get_weather", parameters: { type: "object" } }],
+    });
+
+    const parsedStream = withParsedToolCalls(events);
+    const allEvents: StreamEvent[] = [];
+    const parsedToolCallEvents: any[] = [];
+
+    for await (const event of parsedStream) {
+      allEvents.push(event);
+      if (event.type === "tool_call_parsed") {
+        parsedToolCallEvents.push(event);
+      }
+    }
+
+    // Should have parsed tool call events
+    expect(parsedToolCallEvents.length).toBeGreaterThan(0);
+
+    // Last parsed event should be complete
+    const lastParsed = parsedToolCallEvents[parsedToolCallEvents.length - 1];
+    expect(lastParsed.id).toBe("call_1");
+    expect(lastParsed.name).toBe("get_weather");
+    expect(lastParsed.arguments).toEqual({ city: "Tokyo" });
+    expect(lastParsed.isComplete).toBe(true);
+
+    // Earlier parsed events should be partial
+    const firstParsed = parsedToolCallEvents[0];
+    expect(firstParsed.isComplete).toBe(false);
+  });
+
   it("throws on API error", async () => {
     mockCreate.mockRejectedValue(new Error("429 Too Many Requests"));
 
-    const events = stream({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: "Hi" }],
-    });
+    const events = stream(gpt4o(), { messages: [{ role: "user", content: "Hi" }] });
 
     await expect(collectStream(events)).rejects.toThrow(/429/);
   });
@@ -242,29 +278,17 @@ describe("Azure OpenAI Provider", () => {
   it("sends tools in correct format", async () => {
     mockCreate.mockResolvedValue(mockStream([makeUsageChunk(5, 2)]));
 
-    stream({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: "test" }],
-      tools: [
-        {
-          name: "my_tool",
-          description: "A test tool",
-          parameters: { type: "object", properties: { x: { type: "number" } } },
-        },
-      ],
-    });
+    const tools = [
+      {
+        name: "my_tool",
+        description: "A test tool",
+        parameters: { type: "object", properties: { x: { type: "number" } } },
+      },
+    ];
 
-    // Start iteration so the create promise resolves and call is made
-    const eventStream = stream({
-      model: "gpt-4o",
+    const eventStream = stream(gpt4o(), {
       messages: [{ role: "user", content: "test" }],
-      tools: [
-        {
-          name: "my_tool",
-          description: "A test tool",
-          parameters: { type: "object", properties: { x: { type: "number" } } },
-        },
-      ],
+      tools,
     });
     await collectStream(eventStream);
 
@@ -273,24 +297,43 @@ describe("Azure OpenAI Provider", () => {
     expect(params.tools[0].type).toBe("function");
     expect(params.tools[0].function.name).toBe("my_tool");
   });
+
+  it("passes transport options to provider", async () => {
+    mockCreate.mockResolvedValue(mockStream([makeUsageChunk(5, 2)]));
+
+    const eventStream = stream(gpt4o(), {
+      messages: [{ role: "user", content: "test" }],
+    }, {
+      temperature: 0.5,
+      maxTokens: 100,
+      topP: 0.9,
+      stopSequences: ["\n"],
+    });
+    await collectStream(eventStream);
+
+    const [params] = mockCreate.mock.calls[0];
+    expect(params.temperature).toBe(0.5);
+    expect(params.max_output_tokens).toBe(100);
+    expect(params.top_p).toBe(0.9);
+    expect(params.stop).toEqual(["\n"]);
+  });
 });
 
 describe("streamSimple", () => {
-  beforeEach(() => {
-    vi.stubEnv("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com");
-    vi.stubEnv("AZURE_OPENAI_API_KEY", "test-key");
-  });
+  const gpt4o = () => getModel("gpt-4o")!;
 
-  it("sends prompt and collects result", async () => {
+  it("sends prompt and returns stream", async () => {
     mockCreate.mockResolvedValue(
       mockStream([makeTextDelta("42"), makeFinishChunk("stop"), makeUsageChunk(15, 3)]),
     );
 
-    const result = await streamSimple({
-      model: "gpt-4o",
-      system: "Answer concisely.",
-      prompt: "What is 2+2?",
+    const eventStream = streamSimple(gpt4o(), {
+      messages: [
+        { role: "system", content: "Answer concisely." },
+        { role: "user", content: "What is 2+2?" },
+      ],
     });
+    const result = await collectStream(eventStream, gpt4o());
 
     expect(result.text).toBe("42");
     expect(result.usage.inputTokens).toBe(15);
@@ -331,5 +374,18 @@ describe("Conversation", () => {
     const usage: Usage = { inputTokens: 1000, outputTokens: 500 };
     const cost = calculateCost(usage, model);
     expect(cost.total).toBeGreaterThan(0);
+  });
+
+  it("produces a Context for streaming", () => {
+    const conv = new Conversation();
+    conv.addSystemMessage("Be helpful.");
+    conv.addUserMessage("Hello!");
+
+    const ctx = conv.toContext();
+    expect(ctx.messages).toHaveLength(2);
+    expect(ctx.tools).toBeUndefined();
+
+    const ctxWithTools = conv.toContext([{ name: "my_tool", parameters: { type: "object" } }]);
+    expect(ctxWithTools.tools).toHaveLength(1);
   });
 });

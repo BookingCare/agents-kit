@@ -67,6 +67,49 @@ if (result.stopReason === "tool_use") {
 }
 ```
 
+### Streaming Parsed Tool Calls
+
+For real-time UI updates or early validation, use `withParsedToolCalls` to get partial JSON parsing:
+
+```typescript
+import { stream, withParsedToolCalls } from "@repo/ai";
+
+const events = stream({
+  model: "gpt-4o",
+  messages: [{ role: "user", content: "What's the weather in Tokyo?" }],
+  tools: [
+    {
+      name: "get_weather",
+      description: "Get the current weather in a city",
+      parameters: {
+        type: "object",
+        properties: {
+          city: { type: "string" },
+          units: { type: "string", enum: ["celsius", "fahrenheit"] },
+        },
+        required: ["city"],
+      },
+    },
+  ],
+});
+
+const parsedStream = withParsedToolCalls(events);
+
+for await (const event of parsedStream) {
+  if (event.type === "tool_call_parsed") {
+    // Tool call arguments are parsed as they stream
+    console.log(`Tool: ${event.name}`);
+    console.log(`Arguments:`, event.arguments);
+    console.log(`Complete: ${event.isComplete}`);
+    
+    // Example output:
+    // Tool: get_weather
+    // Arguments: { city: "Tokyo" }
+    // Complete: false  (partial) -> true  (complete)
+  }
+}
+```
+
 ## Conversation & Model Hand-off
 
 ```typescript

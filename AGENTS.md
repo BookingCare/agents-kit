@@ -85,31 +85,52 @@ Use these sections under `## [Unreleased]`:
 
 ## Adding a New LLM provider (packages/ai)
 
-Adding a new provider requires changes across multiple files:
+### Architecture: Model-Context-Options Pattern
+
+All public streaming functions follow the same 3-argument pattern:
+
+```typescript
+function stream<TApi extends Api>(
+  model: Model<TApi>,
+  context: Context,        // { messages, tools? }
+  options?: StreamOptions,  // transport-level: temperature, maxTokens, signal, apiKey, etc.
+): AssistantMessageEventStream
+```
+
+- **`Model<TApi>`** — typed model object from the model registry. Carries API type, provider, base URL, pricing, and compat overrides. The provider is resolved from `model.api`.
+- **`Context`** — content-level: `{ messages: Message[]; tools?: ToolDefinition[] }`. Separates what is being asked from how it is transported.
+- **`StreamOptions`** — transport-level control: temperature, maxTokens, topP, stopSequences, signal, apiKey, transport, cacheRetention, sessionId, onPayload, onResponse, headers, timeoutMs, maxRetries, maxRetryDelayMs, metadata.
+
+Providers implement the `ProviderApi` interface and are registered by API type (not provider name). One provider can serve multiple API types.
 
 ### 1. Core Types (`packages/ai/src/types.ts`)
 
-- Add API identifier to `Api` type union (e.g., `"bedrock-converse-stream"`)
+- Add API identifier to `KnownApi` type union (e.g., `"bedrock-converse-stream"`)
 - Create options interface extending `StreamOptions`
 - Add mapping to `ApiOptionsMap`
 - Add provider name to `knownProvider` type union
 
 ### 2. Provider Implementation (`packages/ai/src/providers/`)
 
-Create provider file exporting:
+Create provider file exporting a `ProviderApi` object:
 
-- `stream<Provider>()` function returning `AssistantMessageEventStream`
-- `streamSimple<Provider>()` for `SimpleStreamOptions` mapping
-- Provider-specific options inteface
-- Message/tool conversation functions
-- Response parsing emmiting standardized events (`text`, `tool_call`, `thinking`, `usage`, `stop`)
+```typescript
+export const myProvider: ProviderApi = {
+  stream<TApi extends Api>(model, context, options?) { ... },
+  streamSimple<TApi extends Api>(model, context, options?) { ... },  // often delegates to stream
+};
+```
 
-### 3. Provider Exports and lazy Registration
+Include message/tool conversion functions and response parsing that emits standardized events (`text`, `tool_call`, `thinking`, `usage`, `stop`).
 
+### 3. Provider Registration
+
+- Register the provider in `packages/ai/src/providers/register-builtins.ts` by API type:
+  ```typescript
+  registerProvider("my-api-type", myProvider);
+  ```
+- Add credential detection in `packages/ai/src/utils/env-api-keys.ts`
 - Add a package subpath export in `packages/ai/package.json` pointing at `./dist/providers/<provider>.js`
-- Add `export type` re-exports in `packages/ai/src/index.ts` for provider option types that should remain available from the root entry
-- Register the provider in `packages/ai/src/providers/register-builtins.ts` via lazy loader wrapers, do not statically import provider implementation modules there
-- Add credential detection in `packages/ai/src/env-api-keys.ts`
 
 ### 4. Model Generation (`packages/ai/scripts/generate-models.ts`)
 
@@ -118,10 +139,10 @@ Create provider file exporting:
 
 ### 5. Tests (`packages/ai/test/`)
 
-- Always add the provider to `stream.test.ts` with least one representative model, even if it reuses an existing API implementation such as `openai-completions`.
-- Add the provider to the broader provider matrix where applicable: `tokens.test.ts`, `abort.test.ts`, `emtpy.test.ts`, `context-overflow.test.ts`, `image-limits.test.ts`, `unicode-surrogate.test.st`, `tool-call-without-result.test.ts`, `image-tool-result.test.ts`, `total-tokens.test.ts`, `cross-provider-handoff.test.st`.
-- For `cross-provider-handoff.test.ts`, add at least provider/model pair. If the provider exposes multiple model families (for example GPT and Claude), add at least one pair family.
-- For non-standard auth, create utility (e.g., `bedrock-utils.ts`) with credidential detection.
+- Always add the provider to `stream.test.ts` with at least one representative model, even if it reuses an existing API implementation such as `openai-completions`.
+- Add the provider to the broader provider matrix where applicable: `tokens.test.ts`, `abort.test.ts`, `empty.test.ts`, `context-overflow.test.ts`, `image-limits.test.ts`, `unicode-surrogate.test.ts`, `tool-call-without-result.test.ts`, `image-tool-result.test.ts`, `total-tokens.test.ts`, `cross-provider-handoff.test.ts`.
+- For `cross-provider-handoff.test.ts`, add at least one provider/model pair. If the provider exposes multiple model families (for example GPT and Claude), add at least one pair per family.
+- For non-standard auth, create utility (e.g., `bedrock-utils.ts`) with credential detection.
 
 ### 6. Documentation
 
