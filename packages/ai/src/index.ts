@@ -52,6 +52,14 @@ export { calculateCost } from "./costs.js";
 // Stream functions
 export { stream, collectStream, streamSimple } from "./stream.js";
 
+// Tool builder
+export { tool } from "./tool.js";
+export type { TypedToolDefinition } from "./tool.js";
+
+// TypeBox re-exports for typed tool definitions
+export { Type } from "@sinclair/typebox";
+export type { Static, TSchema } from "@sinclair/typebox";
+
 // Context persistence
 export { Conversation } from "./context.js";
 export type { ConversationJSON } from "./context.js";

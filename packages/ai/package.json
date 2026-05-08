@@ -33,6 +33,7 @@
     "vitest": "^4.1.5"
   },
   "dependencies": {
+    "@sinclair/typebox": "^0.34.49",
     "openai": "^6.37.0"
   }
 }
