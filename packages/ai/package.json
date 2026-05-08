@@ -1,0 +1,38 @@
+{
+  "name": "@repo/ai",
+  "version": "0.0.0",
+  "description": "Unified LLM API with automatic model discovery, provider configuration, token and cost tracking, and context persistence",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./providers/azure-openai": {
+      "types": "./dist/providers/azure-openai.d.ts",
+      "default": "./dist/providers/azure-openai.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "type-check": "tsc --noEmit",
+    "generate-models": "tsx scripts/generate-models.ts"
+  },
+  "devDependencies": {
+    "@repo/tsconfig": "workspace:*",
+    "@types/node": "^25.6.2",
+    "typescript": "^5.8.0",
+    "vitest": "^4.1.5"
+  },
+  "dependencies": {
+    "openai": "^6.37.0"
+  }
+}
