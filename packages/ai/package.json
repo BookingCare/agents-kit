@@ -1,8 +1,8 @@
 {
-  "name": "@agents-kit/ai",
-  "version": "0.0.0",
+  "name": "@bookingcare/ai",
+  "version": "0.1.0",
   "description": "Unified LLM API with automatic model discovery, provider configuration, token and cost tracking, and context persistence",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
