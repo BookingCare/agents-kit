@@ -13,10 +13,10 @@ pnpm add @agents-kit/ai
 ## Quick Start
 
 ```typescript
-import { getModel, stream, collectStream, streamSimple, Context } from "@agents-kit/ai";
+import { getModel, complete, stream, collectStream } from "@agents-kit/ai";
+import type { Context } from "@agents-kit/ai";
 
-// Get a typed model object from the registry
-const model = getModel("gpt-4o")!;
+const model = getModel("gpt-5.4-nano")!;
 
 const context: Context = {
   messages: [
@@ -25,26 +25,20 @@ const context: Context = {
   ],
 };
 
-// Stream events as they arrive
-const events = stream(model, context);
+// Option 1: Collect the full result at once
+const result = await complete(model, context);
+console.log(result.text);
+console.log(result.usage); // { inputTokens: 20, outputTokens: 5 }
+console.log(result.cost); // { input: 0.000004, output: 0.000006, total: 0.00001 }
 
+// Option 2: Stream events as they arrive
+const events = stream(model, context);
 for await (const event of events) {
   if (event.type === "text") process.stdout.write(event.content);
 }
 
-// Or collect into a single result
-const result = await collectStream(
-  streamSimple(model, {
-    messages: [
-      { role: "system", content: "You are a helpful assistant." },
-      { role: "user", content: "What is 2+2?", timestamp: Date.now() },
-    ],
-  }),
-  model,
-);
-console.log(result.text); // "4"
-console.log(result.usage); // { inputTokens: 20, outputTokens: 5 }
-console.log(result.cost); // { input: 0.00005, output: 0.00005, total: 0.0001 }
+// Option 3: Stream then collect
+const result2 = await collectStream(stream(model, context), model);
 ```
 
 ## Architecture: Model-Context-Options
@@ -63,12 +57,26 @@ function stream<TApi extends Api>(
 - **Context** — content-level: `{ messages: Message[]; tools?: ToolDefinition[] }`. Separates what is being asked from how it is transported.
 - **StreamOptions** — transport-level control: `temperature`, `maxTokens`, `topP`, `stopSequences`, `signal`, `apiKey`, `transport`, `cacheRetention`, `sessionId`, `onPayload`, `onResponse`, `headers`, `timeoutMs`, `maxRetries`, `maxRetryDelayMs`, `metadata`.
 
+## Streaming vs Collecting
+
+There are two families of functions:
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `stream(model, context, options?)` | `AsyncGenerator<StreamEvent>` | Stream events in real time |
+| `streamSimple(model, context, options?)` | `AsyncGenerator<StreamEvent>` | Stream a simple completion |
+| `complete(model, context, options?)` | `Promise<StreamResult>` | Collect full result (wraps `stream`) |
+| `completeSimple(model, context, options?)` | `Promise<StreamResult>` | Collect simple result (wraps `streamSimple`) |
+| `collectStream(eventStream, model?)` | `Promise<StreamResult>` | Consume any stream into a result |
+
+`complete` and `completeSimple` are convenience wrappers that combine streaming and collection in a single call.
+
 ## Tool Calling
 
 ```typescript
-import { getModel, streamSimple, collectStream, type Context } from "@agents-kit/ai";
+import { getModel, complete, type Context } from "@agents-kit/ai";
 
-const model = getModel("gpt-4o")!;
+const model = getModel("gpt-5.4-nano")!;
 
 const context: Context = {
   messages: [{ role: "user", content: "What's the weather in Tokyo?", timestamp: Date.now() }],
@@ -87,7 +95,7 @@ const context: Context = {
   ],
 };
 
-const result = await collectStream(streamSimple(model, context), model);
+const result = await complete(model, context);
 
 if (result.stopReason === "tool_use") {
   const call = result.toolCalls[0];
@@ -125,7 +133,7 @@ For real-time UI updates or early validation, use `withParsedToolCalls` to get p
 ```typescript
 import { getModel, stream, withParsedToolCalls, type Context } from "@agents-kit/ai";
 
-const model = getModel("gpt-4o")!;
+const model = getModel("gpt-5.4-nano")!;
 
 const context: Context = {
   messages: [{ role: "user", content: "What's the weather in Tokyo?", timestamp: Date.now() }],
@@ -133,7 +141,6 @@ const context: Context = {
 };
 
 const events = stream(model, context);
-
 const parsedStream = withParsedToolCalls(events);
 
 for await (const event of parsedStream) {
@@ -150,28 +157,27 @@ for await (const event of parsedStream) {
 ```typescript
 import { getModel, Conversation, stream } from "@agents-kit/ai";
 
-const gpt4o = getModel("gpt-4o")!;
-const gpt4oMini = getModel("gpt-4o-mini")!;
+const model = getModel("gpt-5.4-nano")!;
 
 const conv = new Conversation();
 conv.addSystemMessage("You are a helpful assistant.");
 conv.addUserMessage("Explain quantum computing briefly.");
 
-// First turn with gpt-4o
-const events1 = stream(gpt4o, conv.toContext());
-await conv.addAssistantResponse(events1, gpt4o);
+// First turn
+const events1 = stream(model, conv.toContext());
+await conv.addAssistantResponse(events1, model);
 
-// Second turn, hand off to a cheaper model
+// Second turn
 conv.addUserMessage("Summarize that in one sentence.");
-const events2 = stream(gpt4oMini, conv.toContext());
-await conv.addAssistantResponse(events2, gpt4oMini);
+const events2 = stream(model, conv.toContext());
+await conv.addAssistantResponse(events2, model);
 
 // Track accumulated usage and cost
 console.log(conv.totalUsage);
-console.log(conv.getTotalCost(gpt4o));
+console.log(conv.getTotalCost(model));
 
 // Add tool results
-conv.addToolResult("call_123", "get_weather", [{ type: "text", text: "Sunny, 22°C" }]);
+conv.addToolResult("call_123", "get_weather", [{ type: "text", text: "Sunny, 22\u00B0C" }]);
 
 // Persist conversation
 const json = conv.toJSON();
@@ -185,10 +191,9 @@ import { listModels, getModel, getModelsByProvider } from "@agents-kit/ai";
 
 // All models
 const models = listModels();
-// [{ id: "gpt-4o", name: "GPT-4o", provider: "azure-openai", contextWindow: 128000, ... }, ...]
 
 // Look up a specific model (returns undefined if not found)
-const gpt4o = getModel("gpt-4o");
+const model = getModel("gpt-5.4-nano");
 
 // Filter by provider
 const azureModels = getModelsByProvider("azure-openai");
@@ -206,26 +211,13 @@ AZURE_OPENAI_API_KEY=your-api-key
 AZURE_OPENAI_API_VERSION=2024-12-01-preview  # optional, defaults to 2024-12-01-preview
 ```
 
-The model name in `getModel()` maps to your Azure deployment name. Create deployments named `gpt-4o`, `gpt-4o-mini`, etc. to match the model registry.
+The model name in `getModel()` maps to your Azure deployment name. Create deployments named `gpt-5.4-nano`, etc. to match the model registry.
 
 #### Supported Models
 
-| Model        | Context Window | Max Output | Vision | Thinking | Price (in/out per 1M tokens) |
-| ------------ | -------------- | ---------- | ------ | -------- | ---------------------------- |
-| gpt-4.1      | 1,047,576      | 32,768     | Yes    | No       | $2.00 / $8.00                |
-| gpt-4.1-mini | 1,047,576      | 32,768     | Yes    | No       | $0.40 / $1.60                |
-| gpt-4.1-nano | 1,047,576      | 32,768     | Yes    | No       | $0.10 / $0.40                |
-| gpt-4o       | 128,000        | 16,384     | Yes    | No       | $2.50 / $10.00               |
-| gpt-4o-mini  | 128,000        | 16,384     | Yes    | No       | $0.15 / $0.60                |
-| o1           | 200,000        | 100,000    | Yes    | Yes      | $15.00 / $60.00              |
-| o1-mini      | 128,000        | 65,536     | No     | Yes      | $3.00 / $12.00               |
-| o3-mini      | 200,000        | 100,000    | Yes    | Yes      | $1.10 / $4.40                |
-
-#### Direct Import
-
-```typescript
-import { streamAzureOpenAI } from "@agents-kit/ai/azure-openai";
-```
+| Model        | Context Window | Max Output | Vision | Reasoning | Price (in/out per 1M tokens) |
+| ------------ | -------------- | ---------- | ------ | --------- | ---------------------------- |
+| gpt-5.4-nano | 400,000        | 128,000    | Yes    | No        | $0.20 / $1.25                |
 
 ## Stream Events
 
@@ -236,7 +228,7 @@ The `stream()` function returns an `AsyncGenerator<StreamEvent>` where `StreamEv
 | `text`             | `content`                                         | Text delta                                                                               |
 | `tool_call`        | `index`, `id?`, `name?`, `arguments`              | Tool call delta (id/name on first delta, then argument fragments)                        |
 | `tool_call_parsed` | `index`, `id`, `name`, `arguments`, `isComplete`  | Partially parsed tool call arguments                                                     |
-| `thinking`         | `content`                                         | Reasoning content (o1/o3 models)                                                         |
+| `thinking`         | `content`                                         | Reasoning content                                                                        |
 | `usage`            | `input`, `output`, `cacheCreation?`, `cacheRead?` | Token usage                                                                              |
 | `stop`             | `reason`                                          | Stream ended (`end_turn`, `tool_use`, `max_tokens`, `stop_sequence`, `error`, `unknown`) |
 
@@ -246,13 +238,21 @@ The `stream()` function returns an `AsyncGenerator<StreamEvent>` where `StreamEv
 
 Start a streaming completion. Provider auto-detected from the model's API type.
 
-### `collectStream(eventStream, model?): Promise<StreamResult>`
-
-Consume a stream into a single result with text, tool calls, usage, and optional cost.
-
 ### `streamSimple(model, context, options?): AssistantMessageEventStream`
 
 Stream a simple completion. Same signature as `stream()`.
+
+### `complete(model, context, options?): Promise<StreamResult>`
+
+Generate a completion, collecting the full result. Convenience wrapper around `stream` + `collectStream`.
+
+### `completeSimple(model, context, options?): Promise<StreamResult>`
+
+Generate a simple completion, collecting the full result. Convenience wrapper around `streamSimple` + `collectStream`.
+
+### `collectStream(eventStream, model?): Promise<StreamResult>`
+
+Consume a stream into a single result with text, tool calls, usage, and optional cost. Cost is calculated only when a `model` is provided.
 
 ### `withParsedToolCalls(eventStream): AssistantMessageEventStream`
 
@@ -260,7 +260,7 @@ Wrap an event stream to emit `tool_call_parsed` events with partial JSON parsing
 
 ### `Conversation`
 
-Manages message history, tracks usage, supports serialization and model hand-off. Use `toContext()` to get a `Context` object for passing to `stream()`.
+Manages message history, tracks usage, supports serialization and model hand-off. Use `toContext(tools?)` to get a `Context` object for passing to `stream()`.
 
 ### `tool(def): TypedToolDefinition`
 

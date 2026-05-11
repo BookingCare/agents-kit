@@ -1,58 +1,21 @@
-# Agents Kit
+# Agents Kit Harness Mono Repo
 
-Monorepo built with **pnpm** workspaces and **Turborepo**.
+## All Packages
 
-## Structure
+| Package | Description |
+|---------|-------------|
+| **[@BookingCare/ai](packages/ai)** | Unified multi-provider LLM API (openAI, Anthropic, etc.) |
 
-```
-agents-kit/
-├── apps/           # Applications
-├── packages/
-│   └── tsconfig/   # Shared TypeScript configs (@repo/tsconfig)
-├── turbo.json      # Turborepo pipeline configuration
-├── pnpm-workspace.yaml
-└── package.json
-```
+## Contributing
 
-## Getting Started
+See [CONTRIBUTTING.md](CONTRIBUTTING.md) for contributtion guidelines and [AGENTS.md](AGENTS.md) for project-specifice rules (for both humans and agents).
+
+## Developement
 
 ```bash
-pnpm install         # Install all dependencies
-pnpm dev             # Start all apps in dev mode
-pnpm build           # Build all packages and apps
-pnpm lint            # Lint all packages and apps
-pnpm test            # Run all tests
-pnpm type-check      # Type-check all packages and apps
-pnpm clean           # Remove all build artifacts and node_modules
+pnpm install        # Install all dependencies
+pnpm run build      # Build all packages
+pnpm run check      # Lint, format, and type check
 ```
 
-## Adding a New App
-
-```bash
-mkdir -p apps/my-app
-cd apps/my-app
-# Add package.json, then:
-pnpm install
-```
-
-## Adding a New Package
-
-```bash
-mkdir -p packages/my-package
-cd packages/my-package
-# Add package.json, then:
-pnpm install
-```
-
-## Dependency Management
-
-```bash
-# Add dependency to a specific package
-pnpm add <package> --filter <workspace-name>
-
-# Add workspace dependency
-pnpm add @repo/tsconfig --filter <workspace-name>
-
-# Add dev dependency to root
-pnpm add -Dw <package>
-```
+> **Note:** `pnpm run check` requires `pnpm run build` to be run first.
