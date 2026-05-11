@@ -1,6 +1,6 @@
 import { describe, it, expect, expectTypeOf } from "vitest";
 import { Type, Static, tool } from "../src/index.js";
-import type { ToolDefinition } from "../src/index.js";
+import type { Tool } from "../src/index.js";
 
 describe("tool()", () => {
   it("creates a typed tool definition", () => {
@@ -56,12 +56,12 @@ describe("tool()", () => {
     expectTypeOf<Args>().toMatchTypeOf<{ id: number; name: string; active: boolean }>();
   });
 
-  it("typed tools are assignable to ToolDefinition", () => {
+  it("typed tools are assignable to Tool", () => {
     const schema = Type.Object({ query: Type.String() });
     const t = tool({ name: "search", parameters: schema });
 
-    // This should type-check: TypedToolDefinition -> ToolDefinition
-    const tools: ToolDefinition[] = [t];
+    // This should type-check: Tool<TSchema> -> Tool (erased)
+    const tools: Tool[] = [t];
     expect(tools).toHaveLength(1);
     expect(tools[0].name).toBe("search");
   });

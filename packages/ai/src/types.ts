@@ -19,6 +19,26 @@ export interface ThinkingContent {
 
 export type ContentPart = TextContent | ImageContent;
 
+// === Content Type Guards ===
+
+export function isTextContent(content: ContentPart): content is TextContent {
+  return content.type === "text";
+}
+
+export function isImageContent(content: ContentPart): content is ImageContent {
+  return content.type === "image";
+}
+
+export function isToolCall(content: unknown): content is ToolCall {
+  return (
+    typeof content === "object" &&
+    content !== null &&
+    "id" in content &&
+    "name" in content &&
+    "arguments" in content
+  );
+}
+
 // === Diagnostics ===
 
 export interface AssistantMessageDiagnostic {
@@ -69,12 +89,16 @@ export type Message = SystemMessage | UserMessage | AssistantMessage | ToolResul
 
 // === Tools ===
 
-export interface ToolDefinition {
+import type { TSchema } from "@sinclair/typebox";
+
+export interface Tool<TParams extends TSchema = TSchema> {
   name: string;
   description?: string;
-  /** JSON Schema object */
-  parameters: Record<string, unknown>;
+  parameters: TParams;
 }
+
+/** @deprecated Use `Tool` instead */
+export type ToolDefinition = Tool;
 
 export interface ToolCall {
   id: string;
@@ -83,49 +107,7 @@ export interface ToolCall {
   arguments: string;
 }
 
-// === Stream Events ===
-
-export interface TextEvent {
-  type: "text";
-  content: string;
-}
-
-export interface ToolCallDeltaEvent {
-  type: "tool_call";
-  index: number;
-  /** Present on the first delta for this tool call */
-  id?: string;
-  /** Present on the first delta for this tool call */
-  name?: string;
-  /** Fragment of the JSON arguments */
-  arguments: string;
-}
-
-export interface ToolCallParsedEvent {
-  type: "tool_call_parsed";
-  index: number;
-  /** Tool call ID */
-  id: string;
-  /** Tool name */
-  name: string;
-  /** Partially or fully parsed arguments object */
-  arguments: Record<string, unknown>;
-  /** Whether the arguments are complete */
-  isComplete: boolean;
-}
-
-export interface ThinkingEvent {
-  type: "thinking";
-  content: string;
-}
-
-export interface UsageEvent {
-  type: "usage";
-  input: number;
-  output: number;
-  cacheCreation?: number;
-  cacheRead?: number;
-}
+// === Stop Reason ===
 
 export type StopReason =
   | "end_turn"
@@ -133,24 +115,37 @@ export type StopReason =
   | "max_tokens"
   | "stop_sequence"
   | "error"
-  | "unknown";
+  | "unknown"
+  | "stop"
+  | "length"
+  | "toolUse"
+  | "aborted";
 
-export interface StopEvent {
-  type: "stop";
-  reason: StopReason;
-}
-
-export type StreamEvent =
-  | TextEvent
-  | ToolCallDeltaEvent
-  | ToolCallParsedEvent
-  | ThinkingEvent
-  | UsageEvent
-  | StopEvent;
-
-// === Event Stream ===
-
-export type AssistantMessageEventStream = AsyncGenerator<StreamEvent>;
+/**
+ * Event protocol for AssistantMessageEventStream.
+ *
+ * Streams should emit `start` before partial updates, then terminate with either:
+ * - `done` carrying the final successful AssistantMessage, or
+ * - `error` carrying the final AssistantMessage with stopReason "error" or "aborted"
+ *   and errorMessage.
+ */
+export type AssistantMessageEvent =
+  | { type: "start"; partial: AssistantMessage }
+  | { type: "text_start"; contentIndex: number; partial: AssistantMessage }
+  | { type: "text_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
+  | { type: "text_end"; contentIndex: number; content: string; partial: AssistantMessage }
+  | { type: "thinking_start"; contentIndex: number; partial: AssistantMessage }
+  | { type: "thinking_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
+  | { type: "thinking_end"; contentIndex: number; content: string; partial: AssistantMessage }
+  | { type: "toolcall_start"; contentIndex: number; partial: AssistantMessage }
+  | { type: "toolcall_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
+  | { type: "toolcall_end"; contentIndex: number; toolCall: ToolCall; partial: AssistantMessage }
+  | {
+      type: "done";
+      reason: Extract<StopReason, "stop" | "length" | "toolUse">;
+      message: AssistantMessage;
+    }
+  | { type: "error"; reason: Extract<StopReason, "aborted" | "error">; error: AssistantMessage };
 
 // === Model ===
 
@@ -220,15 +215,7 @@ export interface ThinkingLevelMap {
 /** Compatibility overrides for OpenAI-compatible APIs. */
 export interface OpenAICompletionsCompat {
   /** Override auto-detection of which variant is being used. */
-  variant?:
-    | "openai"
-    | "azure"
-    | "openrouter"
-    | "together"
-    | "deepinfra"
-    | "groq"
-    | "perplexity"
-    | "custom";
+  variant?: "openai" | "azure" | "custom";
   /** Custom headers to include in requests. */
   headers?: Record<string, string>;
 }
@@ -236,15 +223,7 @@ export interface OpenAICompletionsCompat {
 /** Compatibility overrides for OpenAI Responses API. */
 export interface OpenAIResponsesCompat {
   /** Override auto-detection of which variant is being used. */
-  variant?:
-    | "openai"
-    | "azure"
-    | "openrouter"
-    | "together"
-    | "deepinfra"
-    | "groq"
-    | "perplexity"
-    | "custom";
+  variant?: "openai" | "azure" | "custom";
   /** Custom headers to include in requests. */
   headers?: Record<string, string>;
 }
@@ -273,7 +252,7 @@ export interface ProviderResponse {
 /** Conversation context: messages and available tools. */
 export interface Context {
   messages: Message[];
-  tools?: ToolDefinition[];
+  tools?: Tool[];
 }
 
 /** Base stream options — transport-level and request control. */
@@ -358,14 +337,14 @@ export interface ProviderApi {
     model: Model<TApi>,
     context: Context,
     options?: StreamOptions,
-  ): AssistantMessageEventStream;
+  ): import("./utils/event-stream.js").AssistantMessageEventStream;
 
   /** Stream a simple completion (prompt-in, stream-out). */
   streamSimple<TApi extends Api>(
     model: Model<TApi>,
     context: Context,
     options?: StreamOptions,
-  ): AssistantMessageEventStream;
+  ): import("./utils/event-stream.js").AssistantMessageEventStream;
 }
 
 // === Provider-Specific Options ===

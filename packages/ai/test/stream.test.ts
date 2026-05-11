@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { stream, collectStream, streamSimple, withParsedToolCalls, complete, completeSimple } from "../src/stream.js";
+import { stream, collectStream, streamSimple, complete, completeSimple } from "../src/stream.js";
 import { Conversation } from "../src/context.js";
 import { getModel, listModels, getModelsByProvider } from "../src/models.generated.js";
 import { calculateCost } from "../src/utils/costs.js";
 import { listApis } from "../src/provider-registry.js";
-import type { Model, Usage, ToolCallParsedEvent } from "../src/types.js";
+import type { Model, Usage, Tool } from "../src/types.js";
+import { Type } from "@sinclair/typebox";
 import { applyAuth } from "./helpers/auth.js";
 
 const auth = applyAuth();
@@ -120,7 +121,7 @@ describe("Conversation", () => {
     expect(ctx.messages).toHaveLength(2);
     expect(ctx.tools).toBeUndefined();
 
-    const ctxWithTools = conv.toContext([{ name: "my_tool", parameters: { type: "object" } }]);
+    const ctxWithTools = conv.toContext([{ name: "my_tool", parameters: Type.Object({}) }]);
     expect(ctxWithTools.tools).toHaveLength(1);
   });
 });
@@ -131,13 +132,15 @@ describe.skipIf(!auth)("stream", () => {
   const model = () => getModel("gpt-5.4-nano")!;
 
   it("streams text events", async () => {
-    const events = stream(model(), { messages: [userMsg("What is 2+2? Reply with just the number.")] });
+    const events = stream(model(), {
+      messages: [userMsg("What is 2+2? Reply with just the number.")],
+    });
     const result = await collectStream(events, model());
 
     expect(result.text).toContain("4");
     expect(result.usage.inputTokens).toBeGreaterThan(0);
     expect(result.usage.outputTokens).toBeGreaterThan(0);
-    expect(result.stopReason).toBe("end_turn");
+    expect(result.stopReason).toBe("stop");
   });
 
   it("streams tool call events", async () => {
@@ -147,11 +150,9 @@ describe.skipIf(!auth)("stream", () => {
         {
           name: "get_weather",
           description: "Get the current weather in a city",
-          parameters: {
-            type: "object",
-            properties: { city: { type: "string" } },
-            required: ["city"],
-          },
+          parameters: Type.Object({
+            city: Type.String(),
+          }),
         },
       ],
     });
@@ -163,39 +164,7 @@ describe.skipIf(!auth)("stream", () => {
     expect(result.toolCalls[0].id).toBeTruthy();
     const args = JSON.parse(result.toolCalls[0].arguments);
     expect(args.city).toBeTruthy();
-    expect(result.stopReason).toBe("tool_use");
-  });
-
-  it("emits parsed tool call events", async () => {
-    const events = stream(model(), {
-      messages: [userMsg("What is the weather in Tokyo?")],
-      tools: [
-        {
-          name: "get_weather",
-          description: "Get the current weather in a city",
-          parameters: {
-            type: "object",
-            properties: { city: { type: "string" } },
-            required: ["city"],
-          },
-        },
-      ],
-    });
-
-    const parsedStream = withParsedToolCalls(events);
-    const parsedToolCallEvents: ToolCallParsedEvent[] = [];
-
-    for await (const event of parsedStream) {
-      if (event.type === "tool_call_parsed") {
-        parsedToolCallEvents.push(event);
-      }
-    }
-
-    expect(parsedToolCallEvents.length).toBeGreaterThan(0);
-    const last = parsedToolCallEvents[parsedToolCallEvents.length - 1];
-    expect(last.name).toBe("get_weather");
-    expect(last.arguments).toBeDefined();
-    expect(last.isComplete).toBe(true);
+    expect(result.stopReason).toBe("toolUse");
   });
 
   it("sends tools in correct format", async () => {
@@ -205,11 +174,9 @@ describe.skipIf(!auth)("stream", () => {
         {
           name: "my_tool",
           description: "A test tool",
-          parameters: {
-            type: "object",
-            properties: { x: { type: "number" } },
-            required: ["x"],
-          },
+          parameters: Type.Object({
+            x: Type.Number(),
+          }),
         },
       ],
     });
@@ -229,7 +196,7 @@ describe.skipIf(!auth)("stream", () => {
 
     expect(result.text).toBeTruthy();
     expect(result.usage.outputTokens).toBeLessThanOrEqual(10);
-    expect(result.stopReason).toBe("max_tokens");
+    expect(result.stopReason).toBe("length");
   });
 });
 
@@ -261,7 +228,7 @@ describe.skipIf(!auth)("generate", () => {
     expect(result.text).toContain("4");
     expect(result.usage.inputTokens).toBeGreaterThan(0);
     expect(result.usage.outputTokens).toBeGreaterThan(0);
-    expect(result.stopReason).toBe("end_turn");
+    expect(result.stopReason).toBe("stop");
     expect(result.cost).toBeDefined();
     expect(result.cost!.total).toBeGreaterThan(0);
   });

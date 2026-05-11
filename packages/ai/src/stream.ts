@@ -1,6 +1,7 @@
 import type {
   Api,
-  AssistantMessageEventStream,
+  AssistantMessage,
+  AssistantMessageEvent,
   Context,
   Model,
   SimpleStreamOptions,
@@ -10,7 +11,7 @@ import type {
   ToolCall,
   Usage,
 } from "./types.js";
-import { parse } from "partial-json";
+import type { AssistantMessageEventStream } from "./utils/event-stream.js";
 import { getModel } from "./models.generated.js";
 import { resolveApiProvider } from "./provider-registry.js";
 import { registerBuiltinProviders } from "./providers/register-builtins.js";
@@ -45,52 +46,6 @@ export function streamSimple<TApi extends Api>(
 }
 
 /**
- * Wrap an event stream to add parsed tool call events using partial JSON parsing.
- * Emits `tool_call_parsed` events with partially or fully parsed arguments.
- */
-export async function* withParsedToolCalls(
-  eventStream: AssistantMessageEventStream,
-): AssistantMessageEventStream {
-  const toolCallParts = new Map<number, { id: string; name: string; arguments: string }>();
-
-  for await (const event of eventStream) {
-    yield event;
-
-    if (event.type === "tool_call") {
-      const existing = toolCallParts.get(event.index);
-      if (existing) {
-        existing.arguments += event.arguments;
-      } else {
-        toolCallParts.set(event.index, {
-          id: event.id ?? "",
-          name: event.name ?? "",
-          arguments: event.arguments,
-        });
-      }
-
-      const toolCall = toolCallParts.get(event.index)!;
-      if (toolCall.id && toolCall.name && toolCall.arguments) {
-        try {
-          const parsedArgs = parse(toolCall.arguments);
-          if (parsedArgs !== null && typeof parsedArgs === "object") {
-            yield {
-              type: "tool_call_parsed",
-              index: event.index,
-              id: toolCall.id,
-              name: toolCall.name,
-              arguments: parsedArgs as Record<string, unknown>,
-              isComplete: toolCall.arguments.endsWith("}") && toolCall.arguments.startsWith("{"),
-            };
-          }
-        } catch {
-          // Invalid partial JSON, skip emitting parsed event
-        }
-      }
-    }
-  }
-}
-
-/**
  * Consume an event stream into a single StreamResult with accumulated text, tool calls, usage, and cost.
  */
 const MAX_TOOL_CALLS = 128;
@@ -106,41 +61,49 @@ export async function collectStream(
 
   for await (const event of eventStream) {
     switch (event.type) {
-      case "text":
-        text += event.content;
+      case "text_delta":
+        text += event.delta;
         break;
 
-      case "tool_call": {
-        if (toolCallParts.size >= MAX_TOOL_CALLS && !toolCallParts.has(event.index)) {
+      case "toolcall_start": {
+        if (toolCallParts.size >= MAX_TOOL_CALLS) {
           throw new Error(`Too many tool calls (max ${MAX_TOOL_CALLS})`);
         }
-        const existing = toolCallParts.get(event.index);
-        if (existing) {
-          existing.arguments += event.arguments;
-        } else {
-          toolCallParts.set(event.index, {
-            id: event.id ?? "",
-            name: event.name ?? "",
-            arguments: event.arguments,
-          });
-        }
+        toolCallParts.set(event.contentIndex, { id: "", name: "", arguments: "" });
         break;
       }
 
-      case "usage":
-        usage.inputTokens += event.input;
-        usage.outputTokens += event.output;
-        if (event.cacheCreation != null) usage.cacheCreationTokens = event.cacheCreation;
-        if (event.cacheRead != null) usage.cacheReadTokens = event.cacheRead;
+      case "toolcall_delta": {
+        toolCallParts.get(event.contentIndex)!.arguments += event.delta;
+        break;
+      }
+
+      case "toolcall_end": {
+        toolCallParts.set(event.contentIndex, event.toolCall);
+        break;
+      }
+
+      case "done":
+        stopReason = event.reason;
+        usage.inputTokens = event.message.usage.inputTokens;
+        usage.outputTokens = event.message.usage.outputTokens;
+        if (event.message.usage.cacheCreationTokens != null)
+          usage.cacheCreationTokens = event.message.usage.cacheCreationTokens;
+        if (event.message.usage.cacheReadTokens != null)
+          usage.cacheReadTokens = event.message.usage.cacheReadTokens;
         break;
 
-      case "stop":
+      case "error":
         stopReason = event.reason;
+        usage.inputTokens = event.error.usage.inputTokens;
+        usage.outputTokens = event.error.usage.outputTokens;
         break;
     }
   }
 
-  const toolCalls = Array.from(toolCallParts.entries()).sort(([a], [b]) => a - b).map(([, tc]) => tc);
+  const toolCalls = Array.from(toolCallParts.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([, tc]) => tc);
 
   const cost = model ? calculateCost(usage, model) : undefined;
 

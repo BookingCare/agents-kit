@@ -10,17 +10,10 @@ export type {
   AssistantMessage,
   ToolResultMessage,
   Message,
-  ToolDefinition,
+  Tool,
   ToolCall,
-  TextEvent,
-  ToolCallDeltaEvent,
-  ToolCallParsedEvent,
-  ThinkingEvent,
-  UsageEvent,
   StopReason,
-  StopEvent,
-  StreamEvent,
-  AssistantMessageEventStream,
+  AssistantMessageEvent,
   Model,
   Api,
   Provider,
@@ -44,10 +37,21 @@ export type {
   Usage,
   Cost,
   StreamResult,
+  ToolDefinition,
 } from "./types.js";
+
+// Content type guards
+export { isTextContent, isImageContent, isToolCall } from "./types.js";
 
 // Error
 export { AIError } from "./utils/error.js";
+
+// Event stream
+export {
+  EventStream,
+  AssistantMessageEventStream,
+  createAssistantMessageEventStream,
+} from "./utils/event-stream.js";
 
 // Model discovery
 export { getModel, listModels, getModelsByProvider } from "./models.generated.js";
@@ -59,11 +63,10 @@ export { registerProvider, listApis } from "./provider-registry.js";
 export { calculateCost } from "./utils/costs.js";
 
 // Stream functions
-export { stream, collectStream, streamSimple, withParsedToolCalls, complete, completeSimple } from "./stream.js";
+export { stream, collectStream, streamSimple, complete, completeSimple } from "./stream.js";
 
 // Tool builder
 export { tool } from "./tool.js";
-export type { TypedToolDefinition } from "./tool.js";
 
 // TypeBox re-exports for typed tool definitions
 export { Type } from "@sinclair/typebox";

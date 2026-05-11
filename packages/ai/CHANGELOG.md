@@ -1,5 +1,26 @@
 # @agents-kit/ai
 
+## [0.2.0] - 2026-05-11
+
+### Breaking Changes
+
+- `stream()` and `streamSimple()` now return `AssistantMessageEventStream` (push-based `EventStream`) instead of `AsyncGenerator<StreamEvent>`.
+- `Tool<TSchema>` replaces `ToolDefinition`. `ToolDefinition` is now a deprecated alias.
+- `AssistantMessageEvent` replaces flat `StreamEvent` union. Events are now structured with typed start/delta/end lifecycle (`text_start`, `text_delta`, `text_end`, `toolcall_start`, `toolcall_delta`, `toolcall_end`, etc.).
+- Removed `TextEvent`, `ToolCallDeltaEvent`, `ToolCallParsedEvent`, `ThinkingEvent`, `UsageEvent`, `StopEvent`, `StreamEvent` types.
+- Removed `withParsedToolCalls()` (was built on legacy `tool_call_parsed` events).
+- Removed `TypedToolDefinition`; `tool()` now returns `Tool<TParams>` directly.
+- `StopReason` now includes `stop`, `length`, `toolUse`, `aborted` (in addition to legacy values).
+- `OpenAICompletionsCompat.variant` and `OpenAIResponsesCompat.variant` reduced to `"openai" | "azure" | "custom"`.
+
+### Added
+
+- `EventStream<T, R>` class: generic push-based async iterable with typed final result via `result()`.
+- `AssistantMessageEventStream` class: extends `EventStream` with structured event protocol for assistant messages.
+- `createAssistantMessageEventStream()` factory function.
+- `AssistantMessageEvent` type: structured event protocol where every event carries a `partial` `AssistantMessage` for live state inspection.
+- Content type guards: `isTextContent()`, `isImageContent()`, `isToolCall()`.
+
 ## [0.1.2] - 2026-05-11
 
 ### Breaking Changes

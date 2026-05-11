@@ -1,23 +1,11 @@
 import type { TSchema } from "@sinclair/typebox";
-
-/**
- * A tool definition with typed parameters backed by a TypeBox JSON Schema.
- *
- * Use `Static<typeof definition.parameters>` to extract the TypeScript type
- * for the tool's arguments.
- */
-export interface TypedToolDefinition<TParams extends TSchema = TSchema> {
-  name: string;
-  description?: string;
-  parameters: TParams;
-}
+import type { Tool } from "./types.js";
 
 /**
  * Define a tool with a TypeBox JSON Schema for its parameters.
  *
- * The returned definition is compatible with `ToolDefinition` and can be
- * passed directly to `stream()`. Use `Static<typeof result.parameters>` to
- * get the static TypeScript type for the tool arguments.
+ * Use `Static<typeof result.parameters>` to get the static TypeScript type
+ * for the tool arguments.
  *
  * @example
  * ```ts
@@ -45,7 +33,7 @@ export function tool<TParams extends TSchema>(def: {
   name: string;
   description?: string;
   parameters: TParams;
-}): TypedToolDefinition<TParams> {
+}): Tool<TParams> {
   return {
     name: def.name,
     ...(def.description !== undefined && { description: def.description }),
