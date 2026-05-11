@@ -1,4 +1,4 @@
-# @repo/ai
+# @agents-kit/ai
 
 ## [Unreleased]
 

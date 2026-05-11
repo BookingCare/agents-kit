@@ -9,7 +9,7 @@ export function registerProvider(api: string, provider: ProviderApi): void {
 export function resolveApiProvider(api: Api): ProviderApi {
   const provider = providers.get(api);
   if (!provider) {
-    const available = [...providers.keys()];
+    const available = Array.from(providers.keys());
     throw new Error(
       `No provider registered for API: "${api}". Available APIs: ${available.length ? available.join(", ") : "none"}`,
     );
@@ -18,5 +18,5 @@ export function resolveApiProvider(api: Api): ProviderApi {
 }
 
 export function listApis(): string[] {
-  return [...providers.keys()];
+  return Array.from(providers.keys());
 }

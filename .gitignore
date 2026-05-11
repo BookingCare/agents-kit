@@ -8,6 +8,7 @@ dist
 .env
 .env.local
 .env.*.local
+.agents/auth.json
 
 # IDE
 .vscode

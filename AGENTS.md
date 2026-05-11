@@ -33,7 +33,7 @@
 When creating issues:
 
 - Add `pkg:*` labels to indicate which package(s) the issue affects
-    - Available labels: `pkg:agent`, `pkg:ai`, `pkg:ui`, etc...
+  - Available labels: `pkg:agent`, `pkg:ai`, `pkg:ui`, etc...
 - If an issue spans multiple packages, add all relevant labels
 
 When posting issue/PR comments:
@@ -92,9 +92,9 @@ All public streaming functions follow the same 3-argument pattern:
 ```typescript
 function stream<TApi extends Api>(
   model: Model<TApi>,
-  context: Context,        // { messages, tools? }
-  options?: StreamOptions,  // transport-level: temperature, maxTokens, signal, apiKey, etc.
-): AssistantMessageEventStream
+  context: Context, // { messages, tools? }
+  options?: StreamOptions, // transport-level: temperature, maxTokens, signal, apiKey, etc.
+): AssistantMessageEventStream;
 ```
 
 - **`Model<TApi>`** — typed model object from the model registry. Carries API type, provider, base URL, pricing, and compat overrides. The provider is resolved from `model.api`.
@@ -163,12 +163,13 @@ Include message/tool conversion functions and response parsing that emits standa
 1. **Update CHANGELOGs**: Ensure all changes since last release are documented in the `[Unreleased]` section of each affected package's CHANGELOG.md
 
 2. **Run release script**:
-    ```
-    npm run release:patch # Fixes and additions
-    npm run release:minor # API breaking changes
-    ```
+   ```
+   npm run release:patch # Fixes and additions
+   npm run release:minor # API breaking changes
+   ```
 
 ## **CRITICAL** Git Rules for Parallell Agents **CRITICAL**
+
 Multiple agents may work on different files in the same worktree simultaneously. You MUST follow these rules:
 
 ### Committing

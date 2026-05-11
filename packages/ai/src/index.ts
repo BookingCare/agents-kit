@@ -1,8 +1,10 @@
 // Core types
 export type {
-  TextPart,
-  ImagePart,
+  TextContent,
+  ImageContent,
+  ThinkingContent,
   ContentPart,
+  AssistantMessageDiagnostic,
   SystemMessage,
   UserMessage,
   AssistantMessage,
@@ -57,7 +59,7 @@ export { registerProvider, listApis } from "./provider-registry.js";
 export { calculateCost } from "./utils/costs.js";
 
 // Stream functions
-export { stream, collectStream, streamSimple, withParsedToolCalls } from "./stream.js";
+export { stream, collectStream, streamSimple, withParsedToolCalls, complete, completeSimple } from "./stream.js";
 
 // Tool builder
 export { tool } from "./tool.js";

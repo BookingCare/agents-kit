@@ -1,18 +1,31 @@
 // === Content Parts ===
 
-export interface TextPart {
+export interface TextContent {
   type: "text";
   text: string;
 }
 
-export interface ImagePart {
+export interface ImageContent {
   type: "image";
   /** base64 data URL or URL */
   image: string | URL;
   mimeType?: string;
 }
 
-export type ContentPart = TextPart | ImagePart;
+export interface ThinkingContent {
+  type: "thinking";
+  text: string;
+}
+
+export type ContentPart = TextContent | ImageContent;
+
+// === Diagnostics ===
+
+export interface AssistantMessageDiagnostic {
+  type: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
 
 // === Messages ===
 
@@ -23,19 +36,33 @@ export interface SystemMessage {
 
 export interface UserMessage {
   role: "user";
-  content: string | ContentPart[];
+  content: string | (TextContent | ImageContent)[];
+  timestamp: number;
 }
 
 export interface AssistantMessage {
   role: "assistant";
-  content?: string;
-  toolCalls?: ToolCall[];
+  content: (TextContent | ThinkingContent | ToolCall)[];
+  api: Api;
+  provider: Provider;
+  model: string;
+  responseModel?: string;
+  responseId?: string;
+  diagnostics?: AssistantMessageDiagnostic[];
+  usage: Usage;
+  stopReason: StopReason;
+  errorMessage?: string;
+  timestamp: number;
 }
 
-export interface ToolResultMessage {
-  role: "tool";
+export interface ToolResultMessage<TDetails = any> {
+  role: "toolResult";
   toolCallId: string;
-  content: string;
+  toolName: string;
+  content: (TextContent | ImageContent)[];
+  details?: TDetails;
+  isError: boolean;
+  timestamp: number;
 }
 
 export type Message = SystemMessage | UserMessage | AssistantMessage | ToolResultMessage;
@@ -128,45 +155,44 @@ export type AssistantMessageEventStream = AsyncGenerator<StreamEvent>;
 // === Model ===
 
 export interface Model<TApi extends Api> {
-    id: string;
-    name: string;
-    api: TApi;
-    provider: Provider;
-    baseUrl: string;
-    reasoning: boolean;
-    /**
-     * Maps pi thinking levels to provider/model-specific values.
-     * Missing keys use provider defaults. null marks a level as unsupported.
-     */
-    thinkingLevelMap?: ThinkingLevelMap;
-    input: ("text" | "image")[];
-    cost: {
-        input: number; // $/million tokens
-        output: number; // $/million tokens
-        cacheRead: number; // $/million tokens
-        cacheWrite: number; // $/million tokens
-    };
-    contextWindow: number;
-    maxTokens: number;
-    headers?: Record<string, string>;
-    /** Compatibility overrides for OpenAI-compatible APIs. If not set, auto-detected from baseUrl. */
-    compat?: TApi extends "openai-completions"
-        ? OpenAICompletionsCompat
-        : TApi extends "openai-responses"
-            ? OpenAIResponsesCompat
-            : TApi extends "anthropic-messages"
-                ? AnthropicMessagesCompat
-                : never;
+  id: string;
+  name: string;
+  api: TApi;
+  provider: Provider;
+  baseUrl: string;
+  reasoning: boolean;
+  /**
+   * Maps pi thinking levels to provider/model-specific values.
+   * Missing keys use provider defaults. null marks a level as unsupported.
+   */
+  thinkingLevelMap?: ThinkingLevelMap;
+  input: ("text" | "image")[];
+  cost: {
+    input: number; // $/million tokens
+    output: number; // $/million tokens
+    cacheRead: number; // $/million tokens
+    cacheWrite: number; // $/million tokens
+  };
+  contextWindow: number;
+  maxTokens: number;
+  headers?: Record<string, string>;
+  /** Compatibility overrides for OpenAI-compatible APIs. If not set, auto-detected from baseUrl. */
+  compat?: TApi extends "openai-completions"
+    ? OpenAICompletionsCompat
+    : TApi extends "openai-responses"
+      ? OpenAIResponsesCompat
+      : TApi extends "anthropic-messages"
+        ? AnthropicMessagesCompat
+        : never;
 }
 
 // === API Types ===
-export type KnownApi = 
+export type KnownApi =
   | "azure-openai-responses"
   | "azure-openai-completions"
   | "openai-completions"
   | "openai-responses"
   | "anthropic-messages";
-
 
 export type Api = KnownApi | (string & {});
 
@@ -174,10 +200,7 @@ export type Api = KnownApi | (string & {});
 
 export type Provider = string;
 
-export type knownProvider = 
-  | "azure-openai" 
-  | "openai" 
-  | "anthropic";
+export type knownProvider = "azure-openai" | "openai" | "anthropic";
 
 // === Thinking Level Map ===
 
@@ -197,7 +220,15 @@ export interface ThinkingLevelMap {
 /** Compatibility overrides for OpenAI-compatible APIs. */
 export interface OpenAICompletionsCompat {
   /** Override auto-detection of which variant is being used. */
-  variant?: "openai" | "azure" | "openrouter" | "together" | "deepinfra" | "groq" | "perplexity" | "custom";
+  variant?:
+    | "openai"
+    | "azure"
+    | "openrouter"
+    | "together"
+    | "deepinfra"
+    | "groq"
+    | "perplexity"
+    | "custom";
   /** Custom headers to include in requests. */
   headers?: Record<string, string>;
 }
@@ -205,7 +236,15 @@ export interface OpenAICompletionsCompat {
 /** Compatibility overrides for OpenAI Responses API. */
 export interface OpenAIResponsesCompat {
   /** Override auto-detection of which variant is being used. */
-  variant?: "openai" | "azure" | "openrouter" | "together" | "deepinfra" | "groq" | "perplexity" | "custom";
+  variant?:
+    | "openai"
+    | "azure"
+    | "openrouter"
+    | "together"
+    | "deepinfra"
+    | "groq"
+    | "perplexity"
+    | "custom";
   /** Custom headers to include in requests. */
   headers?: Record<string, string>;
 }
@@ -265,7 +304,10 @@ export interface StreamOptions {
    * Optional callback for inspecting or replacing provider payloads before sending.
    * Return undefined to keep the payload unchanged.
    */
-  onPayload?: (payload: unknown, model: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
+  onPayload?: (
+    payload: unknown,
+    model: Model<Api>,
+  ) => unknown | undefined | Promise<unknown | undefined>;
   /**
    * Optional callback invoked after an HTTP response is received and before
    * its body stream is consumed.

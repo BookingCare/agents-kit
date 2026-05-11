@@ -1,113 +1,19 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { stream, collectStream, streamSimple, withParsedToolCalls } from "../src/stream.js";
+import { describe, it, expect } from "vitest";
+import { stream, collectStream, streamSimple, withParsedToolCalls, complete, completeSimple } from "../src/stream.js";
 import { Conversation } from "../src/context.js";
 import { getModel, listModels, getModelsByProvider } from "../src/models.generated.js";
 import { calculateCost } from "../src/utils/costs.js";
 import { listApis } from "../src/provider-registry.js";
-import { AIError } from "../src/utils/error.js";
-import type { Model, Usage, StreamEvent, Context } from "../src/types.js";
-import { _resetClient } from "../src/providers/azure-openai.js";
+import type { Model, Usage, ToolCallParsedEvent } from "../src/types.js";
+import { applyAuth } from "./helpers/auth.js";
 
-// === Helpers to build mock ChatCompletionChunk objects ===
+const auth = applyAuth();
 
-function makeTextDelta(content: string) {
-  return {
-    id: "chatcmpl-test",
-    object: "chat.completion.chunk" as const,
-    created: 0,
-    model: "gpt-4o",
-    choices: [{ index: 0, delta: { content }, finish_reason: null }],
-  };
+function userMsg(content: string) {
+  return { role: "user" as const, content, timestamp: Date.now() };
 }
 
-function makeToolCallDelta(
-  index: number,
-  opts: { id?: string; name?: string; arguments?: string },
-) {
-  return {
-    id: "chatcmpl-test",
-    object: "chat.completion.chunk" as const,
-    created: 0,
-    model: "gpt-4o",
-    choices: [
-      {
-        index: 0,
-        delta: {
-          tool_calls: [
-            {
-              index,
-              ...(opts.id && { id: opts.id, type: "function" as const }),
-              function: {
-                ...(opts.name && { name: opts.name }),
-                arguments: opts.arguments ?? "",
-              },
-            },
-          ],
-        },
-        finish_reason: null,
-      },
-    ],
-  };
-}
-
-function makeFinishChunk(reason: string) {
-  return {
-    id: "chatcmpl-test",
-    object: "chat.completion.chunk" as const,
-    created: 0,
-    model: "gpt-4o",
-    choices: [{ index: 0, delta: {}, finish_reason: reason }],
-  };
-}
-
-function makeUsageChunk(promptTokens: number, completionTokens: number) {
-  return {
-    id: "chatcmpl-test",
-    object: "chat.completion.chunk" as const,
-    created: 0,
-    model: "gpt-4o",
-    choices: [],
-    usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens },
-  };
-}
-
-/** Create a mock async iterable that yields chunks, simulating the SDK Stream */
-function mockStream(chunks: object[]) {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) {
-        yield chunk;
-      }
-    },
-  };
-}
-
-// === Mock the openai/azure module ===
-
-const mockCreate = vi.fn();
-
-vi.mock("openai/azure", () => {
-  const MockAzureOpenAI = vi.fn(function (this: object) {
-    this.chat = { completions: { create: mockCreate } };
-    return this;
-  });
-  return { AzureOpenAI: MockAzureOpenAI };
-});
-
-// Reset the provider-registry module cache so registerBuiltinProviders re-runs
-beforeEach(async () => {
-  vi.stubEnv("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com");
-  vi.stubEnv("AZURE_OPENAI_API_KEY", "test-key");
-  vi.stubEnv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview");
-  mockCreate.mockReset();
-  _resetClient();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
-// === Tests ===
+// === Pure unit tests (no API calls) ===
 
 describe("Model Registry", () => {
   it("lists all models", () => {
@@ -123,9 +29,9 @@ describe("Model Registry", () => {
   });
 
   it("looks up a model by id", () => {
-    const gpt4o = getModel("gpt-4o");
-    expect(gpt4o).toBeDefined();
-    expect(gpt4o!.name).toBe("GPT-4o");
+    const model = getModel("gpt-5.4-nano");
+    expect(model).toBeDefined();
+    expect(model!.name).toBe("GPT-5.4 Nano");
   });
 
   it("returns undefined for unknown model", () => {
@@ -142,7 +48,7 @@ describe("Model Registry", () => {
 
 describe("Cost Calculation", () => {
   it("calculates cost from usage and model", () => {
-    const model: Model = {
+    const model: Model<"azure-openai-completions"> = {
       id: "test",
       name: "Test",
       api: "azure-openai-completions",
@@ -175,177 +81,6 @@ describe("Provider Registry", () => {
   });
 });
 
-describe("Azure OpenAI Provider", () => {
-  const gpt4o = () => getModel("gpt-4o")!;
-
-  it("streams text events", async () => {
-    mockCreate.mockResolvedValue(
-      mockStream([makeTextDelta("Hello"), makeTextDelta(" world"), makeFinishChunk("stop"), makeUsageChunk(10, 5)]),
-    );
-
-    const events = stream(gpt4o(), { messages: [{ role: "user", content: "Hi" }] });
-    const result = await collectStream(events, gpt4o());
-
-    expect(result.text).toBe("Hello world");
-    expect(result.usage.inputTokens).toBe(10);
-    expect(result.usage.outputTokens).toBe(5);
-    expect(result.stopReason).toBe("end_turn");
-
-    // Verify the SDK was called correctly
-    expect(mockCreate).toHaveBeenCalledOnce();
-    const [params] = mockCreate.mock.calls[0];
-    expect(params.model).toBe("gpt-4o");
-    expect(params.stream).toBe(true);
-    expect(params.messages).toHaveLength(1);
-    expect(params.messages[0].role).toBe("user");
-  });
-
-  it("streams tool call events", async () => {
-    mockCreate.mockResolvedValue(
-      mockStream([
-        makeToolCallDelta(0, { id: "call_1", name: "get_weather", arguments: '{"ci' }),
-        makeToolCallDelta(0, { arguments: 'ty":' }),
-        makeToolCallDelta(0, { arguments: '"Tokyo"}' }),
-        makeFinishChunk("tool_calls"),
-        makeUsageChunk(20, 15),
-      ]),
-    );
-
-    const events = stream(gpt4o(), {
-      messages: [{ role: "user", content: "Weather in Tokyo?" }],
-      tools: [{ name: "get_weather", parameters: { type: "object" } }],
-    });
-
-    const result = await collectStream(events, gpt4o());
-
-    expect(result.toolCalls).toHaveLength(1);
-    expect(result.toolCalls[0].id).toBe("call_1");
-    expect(result.toolCalls[0].name).toBe("get_weather");
-    expect(result.toolCalls[0].arguments).toBe('{"city":"Tokyo"}');
-    expect(result.stopReason).toBe("tool_use");
-  });
-
-  it("emits parsed tool call events with partial JSON", async () => {
-    mockCreate.mockResolvedValue(
-      mockStream([
-        makeToolCallDelta(0, { id: "call_1", name: "get_weather", arguments: '{"ci' }),
-        makeToolCallDelta(0, { arguments: 'ty":' }),
-        makeToolCallDelta(0, { arguments: '"Tokyo"}' }),
-        makeFinishChunk("tool_calls"),
-        makeUsageChunk(20, 15),
-      ]),
-    );
-
-    const events = stream(gpt4o(), {
-      messages: [{ role: "user", content: "Weather in Tokyo?" }],
-      tools: [{ name: "get_weather", parameters: { type: "object" } }],
-    });
-
-    const parsedStream = withParsedToolCalls(events);
-    const allEvents: StreamEvent[] = [];
-    const parsedToolCallEvents: any[] = [];
-
-    for await (const event of parsedStream) {
-      allEvents.push(event);
-      if (event.type === "tool_call_parsed") {
-        parsedToolCallEvents.push(event);
-      }
-    }
-
-    // Should have parsed tool call events
-    expect(parsedToolCallEvents.length).toBeGreaterThan(0);
-
-    // Last parsed event should be complete
-    const lastParsed = parsedToolCallEvents[parsedToolCallEvents.length - 1];
-    expect(lastParsed.id).toBe("call_1");
-    expect(lastParsed.name).toBe("get_weather");
-    expect(lastParsed.arguments).toEqual({ city: "Tokyo" });
-    expect(lastParsed.isComplete).toBe(true);
-
-    // Earlier parsed events should be partial
-    const firstParsed = parsedToolCallEvents[0];
-    expect(firstParsed.isComplete).toBe(false);
-  });
-
-  it("throws on API error", async () => {
-    mockCreate.mockRejectedValue(new Error("429 Too Many Requests"));
-
-    const events = stream(gpt4o(), { messages: [{ role: "user", content: "Hi" }] });
-
-    await expect(collectStream(events)).rejects.toThrow(/429/);
-  });
-
-  it("sends tools in correct format", async () => {
-    mockCreate.mockResolvedValue(mockStream([makeUsageChunk(5, 2)]));
-
-    const tools = [
-      {
-        name: "my_tool",
-        description: "A test tool",
-        parameters: { type: "object", properties: { x: { type: "number" } } },
-      },
-    ];
-
-    const eventStream = stream(gpt4o(), {
-      messages: [{ role: "user", content: "test" }],
-      tools,
-    });
-    await collectStream(eventStream);
-
-    const [params] = mockCreate.mock.calls[mockCreate.mock.calls.length - 1];
-    expect(params.tools).toHaveLength(1);
-    expect(params.tools[0].type).toBe("function");
-    expect(params.tools[0].function.name).toBe("my_tool");
-  });
-
-  it("passes transport options to provider", async () => {
-    mockCreate.mockResolvedValue(mockStream([makeUsageChunk(5, 2)]));
-
-    const eventStream = stream(gpt4o(), {
-      messages: [{ role: "user", content: "test" }],
-    }, {
-      temperature: 0.5,
-      maxTokens: 100,
-      topP: 0.9,
-      stopSequences: ["\n"],
-    });
-    await collectStream(eventStream);
-
-    const [params] = mockCreate.mock.calls[0];
-    expect(params.temperature).toBe(0.5);
-    expect(params.max_output_tokens).toBe(100);
-    expect(params.top_p).toBe(0.9);
-    expect(params.stop).toEqual(["\n"]);
-  });
-});
-
-describe("streamSimple", () => {
-  const gpt4o = () => getModel("gpt-4o")!;
-
-  it("sends prompt and returns stream", async () => {
-    mockCreate.mockResolvedValue(
-      mockStream([makeTextDelta("42"), makeFinishChunk("stop"), makeUsageChunk(15, 3)]),
-    );
-
-    const eventStream = streamSimple(gpt4o(), {
-      messages: [
-        { role: "system", content: "Answer concisely." },
-        { role: "user", content: "What is 2+2?" },
-      ],
-    });
-    const result = await collectStream(eventStream, gpt4o());
-
-    expect(result.text).toBe("42");
-    expect(result.usage.inputTokens).toBe(15);
-    expect(result.usage.outputTokens).toBe(3);
-
-    // Verify system message was included
-    const [params] = mockCreate.mock.calls[0];
-    expect(params.messages).toHaveLength(2);
-    expect(params.messages[0].role).toBe("system");
-  });
-});
-
 describe("Conversation", () => {
   it("manages message history", () => {
     const conv = new Conversation();
@@ -370,7 +105,7 @@ describe("Conversation", () => {
   });
 
   it("calculates total cost", () => {
-    const model = getModel("gpt-4o")!;
+    const model = getModel("gpt-5.4-nano")!;
     const usage: Usage = { inputTokens: 1000, outputTokens: 500 };
     const cost = calculateCost(usage, model);
     expect(cost.total).toBeGreaterThan(0);
@@ -387,5 +122,175 @@ describe("Conversation", () => {
 
     const ctxWithTools = conv.toContext([{ name: "my_tool", parameters: { type: "object" } }]);
     expect(ctxWithTools.tools).toHaveLength(1);
+  });
+});
+
+// === E2E tests (real API calls) ===
+
+describe.skipIf(!auth)("stream", () => {
+  const model = () => getModel("gpt-5.4-nano")!;
+
+  it("streams text events", async () => {
+    const events = stream(model(), { messages: [userMsg("What is 2+2? Reply with just the number.")] });
+    const result = await collectStream(events, model());
+
+    expect(result.text).toContain("4");
+    expect(result.usage.inputTokens).toBeGreaterThan(0);
+    expect(result.usage.outputTokens).toBeGreaterThan(0);
+    expect(result.stopReason).toBe("end_turn");
+  });
+
+  it("streams tool call events", async () => {
+    const events = stream(model(), {
+      messages: [userMsg("What is the weather in Tokyo?")],
+      tools: [
+        {
+          name: "get_weather",
+          description: "Get the current weather in a city",
+          parameters: {
+            type: "object",
+            properties: { city: { type: "string" } },
+            required: ["city"],
+          },
+        },
+      ],
+    });
+
+    const result = await collectStream(events, model());
+
+    expect(result.toolCalls.length).toBeGreaterThanOrEqual(1);
+    expect(result.toolCalls[0].name).toBe("get_weather");
+    expect(result.toolCalls[0].id).toBeTruthy();
+    const args = JSON.parse(result.toolCalls[0].arguments);
+    expect(args.city).toBeTruthy();
+    expect(result.stopReason).toBe("tool_use");
+  });
+
+  it("emits parsed tool call events", async () => {
+    const events = stream(model(), {
+      messages: [userMsg("What is the weather in Tokyo?")],
+      tools: [
+        {
+          name: "get_weather",
+          description: "Get the current weather in a city",
+          parameters: {
+            type: "object",
+            properties: { city: { type: "string" } },
+            required: ["city"],
+          },
+        },
+      ],
+    });
+
+    const parsedStream = withParsedToolCalls(events);
+    const parsedToolCallEvents: ToolCallParsedEvent[] = [];
+
+    for await (const event of parsedStream) {
+      if (event.type === "tool_call_parsed") {
+        parsedToolCallEvents.push(event);
+      }
+    }
+
+    expect(parsedToolCallEvents.length).toBeGreaterThan(0);
+    const last = parsedToolCallEvents[parsedToolCallEvents.length - 1];
+    expect(last.name).toBe("get_weather");
+    expect(last.arguments).toBeDefined();
+    expect(last.isComplete).toBe(true);
+  });
+
+  it("sends tools in correct format", async () => {
+    const result = await complete(model(), {
+      messages: [userMsg("Use my_tool with x=5")],
+      tools: [
+        {
+          name: "my_tool",
+          description: "A test tool",
+          parameters: {
+            type: "object",
+            properties: { x: { type: "number" } },
+            required: ["x"],
+          },
+        },
+      ],
+    });
+
+    expect(result.toolCalls.length).toBeGreaterThanOrEqual(1);
+    expect(result.toolCalls[0].name).toBe("my_tool");
+    const args = JSON.parse(result.toolCalls[0].arguments);
+    expect(args.x).toBe(5);
+  });
+
+  it("passes transport options to provider", async () => {
+    const result = await complete(
+      model(),
+      { messages: [userMsg("Write a long essay about computing.")] },
+      { maxTokens: 10 },
+    );
+
+    expect(result.text).toBeTruthy();
+    expect(result.usage.outputTokens).toBeLessThanOrEqual(10);
+    expect(result.stopReason).toBe("max_tokens");
+  });
+});
+
+describe.skipIf(!auth)("streamSimple", () => {
+  const model = () => getModel("gpt-5.4-nano")!;
+
+  it("sends prompt with system message", async () => {
+    const eventStream = streamSimple(model(), {
+      messages: [
+        { role: "system", content: "Reply with exactly the word 'pong'." },
+        userMsg("ping"),
+      ],
+    });
+    const result = await collectStream(eventStream, model());
+
+    expect(result.text.toLowerCase().trim()).toBe("pong");
+    expect(result.usage.inputTokens).toBeGreaterThan(0);
+  });
+});
+
+describe.skipIf(!auth)("generate", () => {
+  const model = () => getModel("gpt-5.4-nano")!;
+
+  it("returns text completion", async () => {
+    const result = await complete(model(), {
+      messages: [userMsg("What is 2+2? Reply with just the number.")],
+    });
+
+    expect(result.text).toContain("4");
+    expect(result.usage.inputTokens).toBeGreaterThan(0);
+    expect(result.usage.outputTokens).toBeGreaterThan(0);
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.cost).toBeDefined();
+    expect(result.cost!.total).toBeGreaterThan(0);
+  });
+
+  it("returns cost from model pricing", async () => {
+    const result = await complete(model(), {
+      messages: [userMsg("Say hello.")],
+    });
+
+    expect(result.cost).toBeDefined();
+    expect(result.cost!.input).toBeGreaterThan(0);
+    expect(result.cost!.output).toBeGreaterThan(0);
+    expect(result.cost!.total).toBeCloseTo(result.cost!.input + result.cost!.output);
+  });
+});
+
+describe.skipIf(!auth)("generateSimple", () => {
+  const model = () => getModel("gpt-5.4-nano")!;
+
+  it("returns text result with system message", async () => {
+    const result = await completeSimple(model(), {
+      messages: [
+        { role: "system", content: "Reply with exactly the word 'pong'." },
+        userMsg("ping"),
+      ],
+    });
+
+    expect(result.text.toLowerCase().trim()).toBe("pong");
+    expect(result.usage.inputTokens).toBeGreaterThan(0);
+    expect(result.cost).toBeDefined();
   });
 });

@@ -84,7 +84,7 @@ Rules:
 
 Create `review.json` with this shape:
 
-```json
+````json
 {
   "verdict": "REJECT",
   "body": "## Overview\n...\n\n## Concerns\n- ...\n\n## Verdict\nFound: 1 critical, 2 important, 3 suggestions\n\n**Request changes**",
@@ -99,7 +99,7 @@ Create `review.json` with this shape:
     }
   ]
 }
-```
+````
 
 Field rules:
 
@@ -126,9 +126,9 @@ Before finishing:
 - Fix invalid JSON if validation fails.
 - Confirm line numbers match the annotated diff.
 - Run the bundled validator against the exact annotated diff you reviewed:
-    ```
-    python3 .agents/skills/review-pr/scripts/validate_review_json.py --review-json review.json --diff pr_diff.txt
-    ```
+  ```
+  python3 .agents/skills/review-pr/scripts/validate_review_json.py --review-json review.json --diff pr_diff.txt
+  ```
   If the script reports any invalid comments, fix `review.json` and rerun it. Do not upload `review.json` until this validator passes. If the script path is not present at that exact location, locate `validate_review_json.py` under the loaded `review-pr` skill directory and run that copy with the same arguments.
 - Do not run `gh pr review`, `gh pr comment`, `gh api`, or any other command that posts to GitHub.
 
@@ -140,15 +140,15 @@ If the prompt says you are in a cloud-environment workflow and the expected loca
 
 - Create `pr_description.txt` yourself from the PR body or GitHub metadata provided in the prompt.
 - Fetch and check out the exact PR head branch by name before generating the diff. Run:
-    ```
-    git fetch origin <head_branch>
-    git checkout <head_branch>
-    ```
+  ```
+  git fetch origin <head_branch>
+  git checkout <head_branch>
+  ```
   Do NOT use `FETCH_HEAD` — always reference the named branch.
 - Generate the diff against the base branch using a three-dot merge-base diff:
-    ```
-    git diff origin/<base_branch>...HEAD
-    ```
+  ```
+  git diff origin/<base_branch>...HEAD
+  ```
   This isolates only the changes introduced by the PR, not accumulated state from other branches.
 - Convert the raw diff into `pr_diff.txt` using the annotated format above before reviewing.
 - If the prompt provides a `resolve_spec_context.py` command, run it only when spec validation is needed and write any returned spec content to `spec_context.md` before running review.

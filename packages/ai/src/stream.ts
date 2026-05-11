@@ -140,11 +140,35 @@ export async function collectStream(
     }
   }
 
-  const toolCalls = [...toolCallParts.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([, tc]) => tc);
+  const toolCalls = Array.from(toolCallParts.entries()).sort(([a], [b]) => a - b).map(([, tc]) => tc);
 
   const cost = model ? calculateCost(usage, model) : undefined;
 
   return { text, toolCalls, usage, cost, stopReason };
+}
+
+/**
+ * Generate a completion from an LLM provider, collecting the full result.
+ * Convenience wrapper around `stream` + `collectStream`.
+ */
+export async function complete<TApi extends Api>(
+  model: Model<TApi>,
+  context: Context,
+  options?: StreamOptions,
+): Promise<StreamResult> {
+  const eventStream = stream(model, context, options);
+  return collectStream(eventStream, model);
+}
+
+/**
+ * Generate a simple completion (prompt-in, result-out).
+ * Convenience wrapper around `streamSimple` + `collectStream`.
+ */
+export async function completeSimple<TApi extends Api>(
+  model: Model<TApi>,
+  context: Context,
+  options?: SimpleStreamOptions,
+): Promise<StreamResult> {
+  const eventStream = streamSimple(model, context, options);
+  return collectStream(eventStream, model);
 }

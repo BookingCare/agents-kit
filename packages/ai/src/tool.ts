@@ -6,9 +6,7 @@ import type { TSchema } from "@sinclair/typebox";
  * Use `Static<typeof definition.parameters>` to extract the TypeScript type
  * for the tool's arguments.
  */
-export interface TypedToolDefinition<
-  TParams extends TSchema = TSchema,
-> {
+export interface TypedToolDefinition<TParams extends TSchema = TSchema> {
   name: string;
   description?: string;
   parameters: TParams;

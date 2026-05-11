@@ -6,9 +6,7 @@ describe("tool()", () => {
   it("creates a typed tool definition", () => {
     const GetWeatherParams = Type.Object({
       city: Type.String(),
-      unit: Type.Optional(
-        Type.Union([Type.Literal("celsius"), Type.Literal("fahrenheit")]),
-      ),
+      unit: Type.Optional(Type.Union([Type.Literal("celsius"), Type.Literal("fahrenheit")])),
     });
 
     const getWeather = tool({
@@ -26,10 +24,7 @@ describe("tool()", () => {
       properties: {
         city: { type: "string" },
         unit: {
-          anyOf: [
-            { const: "celsius" },
-            { const: "fahrenheit" },
-          ],
+          anyOf: [{ const: "celsius" }, { const: "fahrenheit" }],
         },
       },
       required: ["city"],
