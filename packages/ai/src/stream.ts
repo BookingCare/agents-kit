@@ -1,37 +1,93 @@
 import type {
+  Api,
   AssistantMessageEventStream,
-  Message,
+  Context,
+  Model,
   SimpleStreamOptions,
   StreamOptions,
   StreamResult,
   StopReason,
   ToolCall,
   Usage,
-  Api,
 } from "./types.js";
+import { parse } from "partial-json";
 import { getModel } from "./models.generated.js";
-import { getProviderStreamFn } from "./provider-registry.js";
+import { resolveApiProvider } from "./provider-registry.js";
 import { registerBuiltinProviders } from "./providers/register-builtins.js";
-import { calculateCost } from "./costs.js";
+import { calculateCost } from "./utils/costs.js";
 
 registerBuiltinProviders();
 
-function resolveProviderName(modelId: string): string {
-  const model = getModel(modelId);
-  if (model) return model.provider;
-  throw new Error(
-    `Cannot determine provider for model: "${modelId}". Model not found in registry.`,
-  );
+/**
+ * Stream a completion from an LLM provider.
+ * Provider is resolved from the model's API type.
+ */
+export function stream<TApi extends Api>(
+  model: Model<TApi>,
+  context: Context,
+  options?: StreamOptions,
+): AssistantMessageEventStream {
+  const provider = resolveApiProvider(model.api);
+  return provider.stream(model, context, options);
 }
 
 /**
- * Stream a completion from an LLM provider. Provider is auto-detected from the model name.
- * Returns an async generator yielding standardized stream events.
+ * Stream a simple completion (prompt-in, stream-out).
+ * Provider is resolved from the model's API type.
  */
-export function stream(options: StreamOptions): AssistantMessageEventStream {
-  const providerName = resolveProviderName(options.model);
-  const streamFn = getProviderStreamFn(providerName);
-  return streamFn(options);
+export function streamSimple<TApi extends Api>(
+  model: Model<TApi>,
+  context: Context,
+  options?: SimpleStreamOptions,
+): AssistantMessageEventStream {
+  const provider = resolveApiProvider(model.api);
+  return provider.streamSimple(model, context, options);
+}
+
+/**
+ * Wrap an event stream to add parsed tool call events using partial JSON parsing.
+ * Emits `tool_call_parsed` events with partially or fully parsed arguments.
+ */
+export async function* withParsedToolCalls(
+  eventStream: AssistantMessageEventStream,
+): AssistantMessageEventStream {
+  const toolCallParts = new Map<number, { id: string; name: string; arguments: string }>();
+
+  for await (const event of eventStream) {
+    yield event;
+
+    if (event.type === "tool_call") {
+      const existing = toolCallParts.get(event.index);
+      if (existing) {
+        existing.arguments += event.arguments;
+      } else {
+        toolCallParts.set(event.index, {
+          id: event.id ?? "",
+          name: event.name ?? "",
+          arguments: event.arguments,
+        });
+      }
+
+      const toolCall = toolCallParts.get(event.index)!;
+      if (toolCall.id && toolCall.name && toolCall.arguments) {
+        try {
+          const parsedArgs = parse(toolCall.arguments);
+          if (parsedArgs !== null && typeof parsedArgs === "object") {
+            yield {
+              type: "tool_call_parsed",
+              index: event.index,
+              id: toolCall.id,
+              name: toolCall.name,
+              arguments: parsedArgs as Record<string, unknown>,
+              isComplete: toolCall.arguments.endsWith("}") && toolCall.arguments.startsWith("{"),
+            };
+          }
+        } catch {
+          // Invalid partial JSON, skip emitting parsed event
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -41,7 +97,7 @@ const MAX_TOOL_CALLS = 128;
 
 export async function collectStream(
   eventStream: AssistantMessageEventStream,
-  modelId?: string,
+  model?: Model<Api>,
 ): Promise<StreamResult> {
   let text = "";
   const toolCallParts = new Map<number, ToolCall>();
@@ -84,37 +140,35 @@ export async function collectStream(
     }
   }
 
-  const toolCalls = [...toolCallParts.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([, tc]) => tc);
+  const toolCalls = Array.from(toolCallParts.entries()).sort(([a], [b]) => a - b).map(([, tc]) => tc);
 
-  // Calculate cost if model is known
-  let cost;
-  if (modelId) {
-    const model = getModel(modelId);
-    if (model) cost = calculateCost(usage, model);
-  }
+  const cost = model ? calculateCost(usage, model) : undefined;
 
   return { text, toolCalls, usage, cost, stopReason };
 }
 
 /**
- * Convenience: send a simple prompt and collect the full result.
+ * Generate a completion from an LLM provider, collecting the full result.
+ * Convenience wrapper around `stream` + `collectStream`.
  */
-export async function streamSimple(options: SimpleStreamOptions): Promise<StreamResult> {
-  const messages: Message[] = [];
-  if (options.system) {
-    messages.push({ role: "system", content: options.system });
-  }
-  messages.push({ role: "user", content: options.prompt });
+export async function complete<TApi extends Api>(
+  model: Model<TApi>,
+  context: Context,
+  options?: StreamOptions,
+): Promise<StreamResult> {
+  const eventStream = stream(model, context, options);
+  return collectStream(eventStream, model);
+}
 
-  const eventStream = stream({
-    model: options.model,
-    messages,
-    tools: options.tools,
-    temperature: options.temperature,
-    maxTokens: options.maxTokens,
-  });
-
-  return collectStream(eventStream, options.model);
+/**
+ * Generate a simple completion (prompt-in, result-out).
+ * Convenience wrapper around `streamSimple` + `collectStream`.
+ */
+export async function completeSimple<TApi extends Api>(
+  model: Model<TApi>,
+  context: Context,
+  options?: SimpleStreamOptions,
+): Promise<StreamResult> {
+  const eventStream = streamSimple(model, context, options);
+  return collectStream(eventStream, model);
 }

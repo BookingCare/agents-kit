@@ -17,16 +17,16 @@ Discussion, scoping, and design happen on the issue before any PR is opened. Do 
 ### Feature requests differ from bug fixes
 
 - **Features** are gated by readiness labels — `ready-to-spec`, then `ready-to-implement` once the design is settled. Discussion alone is not approval to begin work.
-- Feature work needs a written spec first: a *product spec* + *tech spec* committed under `specs/` before any code is written.
+- Feature work needs a written spec first: a _product spec_ + _tech spec_ committed under `specs/` before any code is written.
 - **Bug fixes** skip both steps. Once triaged as a bug, the issue is implicitly `ready-to-implement`.
 
 ### Readiness labels
 
-| Label | Meaning | Who can pick it up |
-|-------|---------|--------------------|
-| `ready-to-spec` | Problem understood, design is open | Contributors — open a spec PR |
-| `ready-to-implement` | Design settled | Contributors — open a code PR |
-| `needs-mocks` | Design mocks required before implementation | Wait for maintainers |
+| Label                | Meaning                                     | Who can pick it up            |
+| -------------------- | ------------------------------------------- | ----------------------------- |
+| `ready-to-spec`      | Problem understood, design is open          | Contributors — open a spec PR |
+| `ready-to-implement` | Design settled                              | Contributors — open a code PR |
+| `needs-mocks`        | Design mocks required before implementation | Wait for maintainers          |
 
 Anyone can pick up a ready issue — readiness labels are not assignments. If an issue has been sitting un-triaged, mention **@maintainers** in a comment.
 
@@ -115,7 +115,7 @@ Tests are required for most code changes:
 
 - `pnpm lint` and `pnpm type-check` must pass.
 - Follow existing patterns in the codebase.
-- Commit messages should explain *what* and *why*.
+- Commit messages should explain _what_ and _why_.
 
 ## Commit and Branch Conventions
 

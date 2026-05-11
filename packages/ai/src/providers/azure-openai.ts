@@ -5,20 +5,25 @@ import type {
   ChatCompletionTool,
 } from "openai/resources/chat/completions";
 import type {
-  AssistantMessage,
   AssistantMessageEventStream,
-  ContentPart,
+  ImageContent,
   Message,
+  Model,
   StopReason,
   StreamEvent,
   StreamOptions,
   SystemMessage,
+  TextContent,
+  ToolCall,
   ToolDefinition,
   ToolResultMessage,
   UserMessage,
+  Api,
+  Context,
+  ProviderApi,
 } from "../types.js";
-import { detectAzureOpenAIConfig } from "../env-api-keys.js";
-import { AIError } from "../error.js";
+import { detectAzureOpenAIConfig } from "../utils/env-api-keys.js";
+import { AIError } from "../utils/error.js";
 
 /**
  * Cached Azure OpenAI client.
@@ -49,7 +54,10 @@ function getClient(): AzureOpenAI {
   return cachedClient;
 }
 
-function convertUserContent(content: string | ContentPart[]): string | Array<Record<string, unknown>> {
+function convertUserContent(
+  
+  content: string | (TextContent | ImageContent)[],
+): string | Array<Record<string, unknown>> {
   if (typeof content === "string") return content;
   return content.map((part) => {
     if (part.type === "text") {
@@ -79,12 +87,18 @@ function convertMessages(messages: Message[]): ChatCompletionMessageParam[] {
         } as ChatCompletionMessageParam;
       }
       case "assistant": {
-        const m = msg as AssistantMessage;
+        const m = msg;
+        let text = "";
+        const toolCalls: ToolCall[] = [];
+        for (const c of m.content) {
+          if ("type" in c && c.type === "text") text += c.text;
+          else if ("id" in c) toolCalls.push(c as ToolCall);
+        }
         return {
           role: "assistant",
-          ...(m.content !== undefined && { content: m.content }),
-          ...(m.toolCalls?.length && {
-            tool_calls: m.toolCalls.map((tc) => ({
+          ...(text && { content: text }),
+          ...(toolCalls.length && {
+            tool_calls: toolCalls.map((tc) => ({
               id: tc.id,
               type: "function" as const,
               function: { name: tc.name, arguments: tc.arguments },
@@ -92,9 +106,13 @@ function convertMessages(messages: Message[]): ChatCompletionMessageParam[] {
           }),
         };
       }
-      case "tool": {
+      case "toolResult": {
         const m = msg as ToolResultMessage;
-        return { role: "tool", tool_call_id: m.toolCallId, content: m.content };
+        const text = m.content
+          .filter((c): c is TextContent => c.type === "text")
+          .map((c) => c.text)
+          .join("");
+        return { role: "tool", tool_call_id: m.toolCallId, content: text };
       }
     }
   });
@@ -178,25 +196,29 @@ function parseChunk(chunk: ChatCompletionChunk): StreamEvent[] {
   return events;
 }
 
-export async function* streamAzureOpenAI(options: StreamOptions): AssistantMessageEventStream {
+async function* streamAzureOpenAI<TApi extends Api>(
+  model: Model<TApi>,
+  context: Context,
+  options?: StreamOptions,
+): AssistantMessageEventStream {
   const client = getClient();
 
   const createParams = {
-    model: options.model,
-    messages: convertMessages(options.messages),
+    model: model.id,
+    messages: convertMessages(context.messages),
     stream: true as const,
     stream_options: { include_usage: true as const },
-    ...(options.tools?.length && { tools: convertTools(options.tools) }),
-    ...(options.temperature !== undefined && { temperature: options.temperature }),
-    ...(options.maxTokens !== undefined && { max_output_tokens: options.maxTokens }),
-    ...(options.topP !== undefined && { top_p: options.topP }),
-    ...(options.stopSequences?.length && { stop: options.stopSequences }),
+    ...(context.tools?.length && { tools: convertTools(context.tools) }),
+    ...(options?.temperature !== undefined && { temperature: options.temperature }),
+    ...(options?.maxTokens !== undefined && { max_completion_tokens: options.maxTokens }),
+    ...(options?.topP !== undefined && { top_p: options.topP }),
+    ...(options?.stopSequences?.length && { stop: options.stopSequences }),
   };
 
   let stream: AsyncIterable<ChatCompletionChunk>;
   try {
     const response = await client.chat.completions.create(createParams, {
-      signal: options.abortSignal,
+      signal: options?.signal,
     });
     // The SDK returns Stream<ChatCompletionChunk> when stream: true
     stream = response as AsyncIterable<ChatCompletionChunk>;
@@ -215,6 +237,7 @@ export async function* streamAzureOpenAI(options: StreamOptions): AssistantMessa
   }
 }
 
-export function createAzureOpenAIStreamFn() {
-  return streamAzureOpenAI;
-}
+export const azureOpenAIProvider: ProviderApi = {
+  stream: streamAzureOpenAI,
+  streamSimple: streamAzureOpenAI,
+};

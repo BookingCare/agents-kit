@@ -1,17 +1,26 @@
-# @repo/ai
+# @agents-kit/ai
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `stream()` now takes `(Model, Context, StreamOptions?)` instead of a single options bag. Model ID strings replaced by typed `Model` objects; messages/tools moved to `Context`.
+- `streamSimple()` now takes `(Model, Context, StreamOptions?)` and returns `AssistantMessageEventStream` instead of `Promise<StreamResult>`.
+- `collectStream()` takes an optional `Model` object instead of a model ID string.
+- `Conversation.addAssistantResponse()` takes an optional `Model` instead of model ID string.
+- `Conversation.getTotalCost()` takes a `Model` instead of model ID string.
+- `CompletionRequest` removed — decomposed into `(Model, Context, StreamOptions)`.
+- `abortSignal` renamed to `signal` across all interfaces.
+- Provider registry keyed by API type instead of provider name; `listProviders()` replaced by `listApis()`.
+- Providers implement `ProviderApi` interface with `stream()` and `streamSimple()` methods.
+
 ### Added
 
-- Unified LLM API with automatic provider detection from model names
-- Azure OpenAI provider with streaming, tool calling, and SSE parsing
-- Model registry with capabilities, context windows, and pricing for 8 Azure OpenAI models (gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, gpt-4o, gpt-4o-mini, o1, o1-mini, o3-mini)
-- Token cost tracking via `calculateCost()` and automatic cost in `StreamResult`
-- `Conversation` class for message history, usage accumulation, serialization, and model hand-off
-- `stream()` for async generator-based streaming
-- `collectStream()` to accumulate events into a single result
-- `streamSimple()` for prompt-in, result-out usage
-- Environment variable credential detection (`AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_VERSION`)
-- Model generation script (`scripts/generate-models.ts`)
-- Support for vision (image content parts) and thinking/reasoning events
+- `Context` interface: `{ messages: Message[]; tools?: ToolDefinition[] }` — separates content from transport options.
+- `ProviderApi` interface for provider implementations.
+- `StreamOptions` extended with `topP`, `stopSequences`, `transport`, `cacheRetention`, `sessionId`, `onPayload`, `onResponse`, `headers`, `timeoutMs`, `maxRetries`, `maxRetryDelayMs`, `metadata`.
+- `Transport`, `CacheRetention`, `ProviderResponse` types.
+- `Conversation.toContext()` for building a `Context` from a conversation.
+- `withParsedToolCalls()` wrapper for partial JSON parsing of tool call arguments.
+- `ToolCallParsedEvent` type for streaming parsed tool call events.
+- `src/utils/` directory for utility modules (`error.ts`, `costs.ts`, `env-api-keys.ts`).

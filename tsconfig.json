@@ -1,0 +1,14 @@
+{
+  "extends": "./packages/tsconfig/base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "*": ["./*"],
+      "@agents-kit/ai": ["./packages/ai/src/index.ts"],
+      "@agents-kit/ai/*": ["./packages/ai/src/*.ts", "./packages/ai/src/providers/*.ts"],
+      "@agents-kit/ai/dist/*": ["./packages/ai/src/*"],
+      "typebox": ["./node_modules/typebox"]
+    }
+  },
+  "include": ["packages/*/src/**/*", "packages/*/test/**/*"]
+}

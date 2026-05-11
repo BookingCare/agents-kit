@@ -1,5 +1,5 @@
 export class AIError extends Error {
-  override readonly cause?: unknown;
+  readonly cause?: unknown;
   readonly provider?: string;
 
   constructor(message: string, options?: { provider?: string; cause?: unknown }) {

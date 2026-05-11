@@ -1,14 +1,22 @@
 import type {
   AssistantMessageEventStream,
   ContentPart,
+  Context,
   Message,
+  Model,
+  Api,
   StreamResult,
+  ToolDefinition,
+  ToolResultMessage,
   Usage,
   Cost,
+  TextContent,
+  ImageContent,
+  ThinkingContent,
+  ToolCall,
 } from "./types.js";
 import { collectStream } from "./stream.js";
-import { getModel } from "./models.generated.js";
-import { calculateCost } from "./costs.js";
+import { calculateCost } from "./utils/costs.js";
 
 export interface ConversationJSON {
   messages: Message[];
@@ -45,7 +53,7 @@ export class Conversation {
 
   /** Add a user message */
   addUserMessage(content: string | ContentPart[]): void {
-    this.messages.push({ role: "user", content });
+    this.messages.push({ role: "user", content, timestamp: Date.now() });
     this.enforceMessageLimit();
   }
 
@@ -56,17 +64,26 @@ export class Conversation {
    */
   async addAssistantResponse(
     eventStream: AssistantMessageEventStream,
-    modelId?: string,
+    model?: Model<Api>,
   ): Promise<StreamResult> {
-    const result = await collectStream(eventStream, modelId);
+    const result = await collectStream(eventStream, model);
 
-    const assistantMsg: Message = { role: "assistant" };
+    const content: (TextContent | ThinkingContent | ToolCall)[] = [];
     if (result.text) {
-      (assistantMsg as { content?: string }).content = result.text;
+      content.push({ type: "text", text: result.text });
     }
-    if (result.toolCalls.length) {
-      (assistantMsg as { toolCalls?: unknown }).toolCalls = result.toolCalls;
-    }
+    content.push(...result.toolCalls);
+
+    const assistantMsg: Message = {
+      role: "assistant",
+      content,
+      api: model?.api ?? ("unknown" as Api),
+      provider: model?.provider ?? "unknown",
+      model: model?.id ?? "unknown",
+      usage: result.usage,
+      stopReason: result.stopReason,
+      timestamp: Date.now(),
+    };
     this.messages.push(assistantMsg);
     this.enforceMessageLimit();
 
@@ -77,8 +94,22 @@ export class Conversation {
   }
 
   /** Add a tool result message */
-  addToolResult(toolCallId: string, content: string): void {
-    this.messages.push({ role: "tool", toolCallId, content });
+  addToolResult(
+    toolCallId: string,
+    toolName: string,
+    content: (TextContent | ImageContent)[],
+    options?: { isError?: boolean; details?: unknown },
+  ): void {
+    const msg: ToolResultMessage = {
+      role: "toolResult",
+      toolCallId,
+      toolName,
+      content,
+      isError: options?.isError ?? false,
+      timestamp: Date.now(),
+      ...(options?.details !== undefined && { details: options.details }),
+    };
+    this.messages.push(msg);
     this.enforceMessageLimit();
   }
 
@@ -87,15 +118,18 @@ export class Conversation {
     return [...this.messages];
   }
 
+  /** Get as a Context object for passing to stream/streamSimple. */
+  toContext(tools?: ToolDefinition[]): Context {
+    return { messages: [...this.messages], tools };
+  }
+
   /** Get accumulated token usage */
   get totalUsage(): Usage {
     return { ...this._totalUsage };
   }
 
   /** Calculate total cost based on a specific model's pricing */
-  getTotalCost(modelId: string): Cost | undefined {
-    const model = getModel(modelId);
-    if (!model) return undefined;
+  getTotalCost(model: Model<Api>): Cost {
     return calculateCost(this._totalUsage, model);
   }
 
