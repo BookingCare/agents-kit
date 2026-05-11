@@ -32,13 +32,17 @@ console.log(result.usage); // { inputTokens: 20, outputTokens: 5 }
 console.log(result.cost); // { input: 0.000004, output: 0.000006, total: 0.00001 }
 
 // Option 2: Stream events as they arrive
-const events = stream(model, context);
-for await (const event of events) {
-  if (event.type === "text") process.stdout.write(event.content);
+const eventStream = stream(model, context);
+for await (const event of eventStream) {
+  if (event.type === "text_delta") process.stdout.write(event.delta);
 }
 
 // Option 3: Stream then collect
 const result2 = await collectStream(stream(model, context), model);
+
+// Option 4: Await the final message directly
+const eventStream2 = stream(model, context);
+const finalMessage = await eventStream2.result();
 ```
 
 ## Architecture: Model-Context-Options
@@ -54,22 +58,61 @@ function stream<TApi extends Api>(
 ```
 
 - **Model** — carries API type, provider, base URL, pricing, and compat overrides. The provider is resolved from `model.api`.
-- **Context** — content-level: `{ messages: Message[]; tools?: ToolDefinition[] }`. Separates what is being asked from how it is transported.
+- **Context** — content-level: `{ messages: Message[]; tools?: Tool[] }`. Separates what is being asked from how it is transported.
 - **StreamOptions** — transport-level control: `temperature`, `maxTokens`, `topP`, `stopSequences`, `signal`, `apiKey`, `transport`, `cacheRetention`, `sessionId`, `onPayload`, `onResponse`, `headers`, `timeoutMs`, `maxRetries`, `maxRetryDelayMs`, `metadata`.
 
 ## Streaming vs Collecting
 
 There are two families of functions:
 
-| Function | Returns | Description |
-|----------|---------|-------------|
-| `stream(model, context, options?)` | `AsyncGenerator<StreamEvent>` | Stream events in real time |
-| `streamSimple(model, context, options?)` | `AsyncGenerator<StreamEvent>` | Stream a simple completion |
-| `complete(model, context, options?)` | `Promise<StreamResult>` | Collect full result (wraps `stream`) |
-| `completeSimple(model, context, options?)` | `Promise<StreamResult>` | Collect simple result (wraps `streamSimple`) |
-| `collectStream(eventStream, model?)` | `Promise<StreamResult>` | Consume any stream into a result |
+| Function                                   | Returns                       | Description                                  |
+| ------------------------------------------ | ----------------------------- | -------------------------------------------- |
+| `stream(model, context, options?)`         | `AssistantMessageEventStream` | Stream events in real time                   |
+| `streamSimple(model, context, options?)`   | `AssistantMessageEventStream` | Stream a simple completion                   |
+| `complete(model, context, options?)`       | `Promise<StreamResult>`       | Collect full result (wraps `stream`)         |
+| `completeSimple(model, context, options?)` | `Promise<StreamResult>`       | Collect simple result (wraps `streamSimple`) |
+| `collectStream(eventStream, model?)`       | `Promise<StreamResult>`       | Consume any stream into a result             |
 
 `complete` and `completeSimple` are convenience wrappers that combine streaming and collection in a single call.
+
+## Event Stream
+
+The `stream()` function returns an `AssistantMessageEventStream` — a push-based async iterable that emits structured `AssistantMessageEvent` events. Every event carries a `partial` field with the current state of the `AssistantMessage` being built, enabling live state inspection.
+
+### Event Protocol
+
+Streams emit `start` before partial updates, then terminate with either `done` (success) or `error`:
+
+| Event            | Fields                                | Description                                     |
+| ---------------- | ------------------------------------- | ----------------------------------------------- |
+| `start`          | `partial`                             | Stream started, first partial message           |
+| `text_start`     | `contentIndex`, `partial`             | Text content block started                      |
+| `text_delta`     | `contentIndex`, `delta`, `partial`    | Text fragment                                   |
+| `text_end`       | `contentIndex`, `content`, `partial`  | Text content block completed                    |
+| `thinking_start` | `contentIndex`, `partial`             | Thinking block started                          |
+| `thinking_delta` | `contentIndex`, `delta`, `partial`    | Thinking fragment                               |
+| `thinking_end`   | `contentIndex`, `content`, `partial`  | Thinking block completed                        |
+| `toolcall_start` | `contentIndex`, `partial`             | Tool call started                               |
+| `toolcall_delta` | `contentIndex`, `delta`, `partial`    | Tool call argument fragment                     |
+| `toolcall_end`   | `contentIndex`, `toolCall`, `partial` | Tool call completed with full `ToolCall` object |
+| `done`           | `reason`, `message`                   | Stream completed successfully                   |
+| `error`          | `reason`, `error`                     | Stream ended with error                         |
+
+### EventStream API
+
+The `AssistantMessageEventStream` extends the generic `EventStream<T, R>` class:
+
+```typescript
+const eventStream = stream(model, context);
+
+// Iterate events as they arrive
+for await (const event of eventStream) {
+  if (event.type === "text_delta") process.stdout.write(event.delta);
+}
+
+// Or await the final AssistantMessage directly
+const message = await eventStream.result();
+```
 
 ## Tool Calling
 
@@ -97,7 +140,7 @@ const context: Context = {
 
 const result = await complete(model, context);
 
-if (result.stopReason === "tool_use") {
+if (result.stopReason === "toolUse") {
   const call = result.toolCalls[0];
   console.log(call.name); // "get_weather"
   console.log(call.arguments); // '{"city":"Tokyo"}'
@@ -124,32 +167,6 @@ const getWeather = tool({
 
 type WeatherArgs = Static<typeof getWeather.parameters>;
 // { city: string; unit?: "celsius" | "fahrenheit" }
-```
-
-### Streaming Parsed Tool Calls
-
-For real-time UI updates or early validation, use `withParsedToolCalls` to get partial JSON parsing:
-
-```typescript
-import { getModel, stream, withParsedToolCalls, type Context } from "@agents-kit/ai";
-
-const model = getModel("gpt-5.4-nano")!;
-
-const context: Context = {
-  messages: [{ role: "user", content: "What's the weather in Tokyo?", timestamp: Date.now() }],
-  tools: [getWeather],
-};
-
-const events = stream(model, context);
-const parsedStream = withParsedToolCalls(events);
-
-for await (const event of parsedStream) {
-  if (event.type === "tool_call_parsed") {
-    console.log(`Tool: ${event.name}`);
-    console.log(`Arguments:`, event.arguments);
-    console.log(`Complete: ${event.isComplete}`);
-  }
-}
 ```
 
 ## Conversation & Model Hand-off
@@ -219,18 +236,23 @@ The model name in `getModel()` maps to your Azure deployment name. Create deploy
 | ------------ | -------------- | ---------- | ------ | --------- | ---------------------------- |
 | gpt-5.4-nano | 400,000        | 128,000    | Yes    | No        | $0.20 / $1.25                |
 
-## Stream Events
+## Content Type Guards
 
-The `stream()` function returns an `AsyncGenerator<StreamEvent>` where `StreamEvent` is one of:
+Utility functions for narrowing content types:
 
-| Event              | Fields                                            | Description                                                                              |
-| ------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `text`             | `content`                                         | Text delta                                                                               |
-| `tool_call`        | `index`, `id?`, `name?`, `arguments`              | Tool call delta (id/name on first delta, then argument fragments)                        |
-| `tool_call_parsed` | `index`, `id`, `name`, `arguments`, `isComplete`  | Partially parsed tool call arguments                                                     |
-| `thinking`         | `content`                                         | Reasoning content                                                                        |
-| `usage`            | `input`, `output`, `cacheCreation?`, `cacheRead?` | Token usage                                                                              |
-| `stop`             | `reason`                                          | Stream ended (`end_turn`, `tool_use`, `max_tokens`, `stop_sequence`, `error`, `unknown`) |
+```typescript
+import { isTextContent, isImageContent, isToolCall } from "@agents-kit/ai";
+
+// Check content parts
+if (isTextContent(part)) {
+  console.log(part.text);
+}
+
+// Check tool calls
+if (isToolCall(someValue)) {
+  console.log(someValue.name, someValue.arguments);
+}
+```
 
 ## API Reference
 
@@ -254,15 +276,11 @@ Generate a simple completion, collecting the full result. Convenience wrapper ar
 
 Consume a stream into a single result with text, tool calls, usage, and optional cost. Cost is calculated only when a `model` is provided.
 
-### `withParsedToolCalls(eventStream): AssistantMessageEventStream`
-
-Wrap an event stream to emit `tool_call_parsed` events with partial JSON parsing.
-
 ### `Conversation`
 
 Manages message history, tracks usage, supports serialization and model hand-off. Use `toContext(tools?)` to get a `Context` object for passing to `stream()`.
 
-### `tool(def): TypedToolDefinition`
+### `tool(def): Tool<TParams>`
 
 Define a tool with a TypeBox schema for type-safe parameters.
 
@@ -289,3 +307,27 @@ Register a provider implementation for an API type.
 ### `listApis(): string[]`
 
 List registered API types.
+
+### `isTextContent(content): boolean`
+
+Type guard for `TextContent`.
+
+### `isImageContent(content): boolean`
+
+Type guard for `ImageContent`.
+
+### `isToolCall(value): boolean`
+
+Type guard for `ToolCall`.
+
+### `EventStream<T, R>`
+
+Generic push-based async iterable with a typed final result. Call `push()` to emit events, `end()` to close, and `result()` to await the final value.
+
+### `AssistantMessageEventStream`
+
+Extends `EventStream<AssistantMessageEvent, AssistantMessage>`. The standard return type for all streaming functions.
+
+### `createAssistantMessageEventStream(): AssistantMessageEventStream`
+
+Factory function to create a new event stream instance.
