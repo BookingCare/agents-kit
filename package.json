@@ -9,10 +9,10 @@
     "type-check": "turbo run type-check",
     "clean": "turbo run clean && rm -rf node_modules",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "version:patch": "npm version patch -ws --no-git-tag-version && node scripts/sync-versions.mjs",
-    "version:minor": "npm version minor -ws --no-git-tag-version && node scripts/sync-versions.mjs",
-    "version:major": "npm version major -ws --no-git-tag-version && node scripts/sync-versions.mjs",
-    "publish": "npm publish -w packages/ai --access public"
+    "version:patch": "pnpm -r exec -- npm version patch --no-git-tag-version && node scripts/sync-versions.mjs",
+    "version:minor": "pnpm -r exec -- npm version minor --no-git-tag-version && node scripts/sync-versions.mjs",
+    "version:major": "pnpm -r exec -- npm version major --no-git-tag-version && node scripts/sync-versions.mjs",
+    "publish": "pnpm --filter @bookingcare/ai publish --access public --no-git-checks"
   },
   "devDependencies": {
     "turbo": "^2.9.9",

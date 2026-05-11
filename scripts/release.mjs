@@ -80,7 +80,7 @@ function bumpOrSetVersion(target) {
 
 	if (BUMP_TYPES.has(target)) {
 		console.log(`Bumping version (${target})...`);
-		run(`npm run version:${target}`);
+		run(`pnpm run version:${target}`);
 		return getVersion();
 	}
 
@@ -91,7 +91,7 @@ function bumpOrSetVersion(target) {
 
 	console.log(`Setting explicit version (${target})...`);
 	run(
-		`npm version ${target} -ws --no-git-tag-version && node scripts/sync-versions.mjs && npx shx rm -rf node_modules packages/*/node_modules package-lock.json && npm install`,
+		`pnpm -r exec -- npm version ${target} --no-git-tag-version && node scripts/sync-versions.mjs && pnpm install`,
 	);
 	return getVersion();
 }
@@ -173,7 +173,7 @@ console.log();
 
 // 5. Publish
 console.log("Publishing to npm...");
-run("npm run publish");
+run("pnpm run publish");
 console.log();
 
 // 6. Add new [Unreleased] sections
