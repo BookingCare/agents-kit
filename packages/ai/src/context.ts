@@ -1,12 +1,11 @@
 import type {
-  AssistantMessageEventStream,
   ContentPart,
   Context,
   Message,
   Model,
   Api,
   StreamResult,
-  ToolDefinition,
+  Tool,
   ToolResultMessage,
   Usage,
   Cost,
@@ -16,6 +15,7 @@ import type {
   ToolCall,
 } from "./types.js";
 import { collectStream } from "./stream.js";
+import type { AssistantMessageEventStream } from "./utils/event-stream.js";
 import { calculateCost } from "./utils/costs.js";
 
 export interface ConversationJSON {
@@ -119,7 +119,7 @@ export class Conversation {
   }
 
   /** Get as a Context object for passing to stream/streamSimple. */
-  toContext(tools?: ToolDefinition[]): Context {
+  toContext(tools?: Tool[]): Context {
     return { messages: [...this.messages], tools };
   }
 
