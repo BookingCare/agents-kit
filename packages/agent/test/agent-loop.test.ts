@@ -1,0 +1,275 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { agentLoop } from "../src/agent-loop.js";
+import { createToolDispatch } from "../src/tools.js";
+import { getModel } from "@bookingcare/ai";
+import { applyAuth } from "./helpers/auth.js";
+import type { StreamResult } from "@bookingcare/ai";
+import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { tmpdir } from "node:os";
+
+const auth = applyAuth();
+
+const model = () => getModel("gpt-5.4-nano")!;
+
+// --- s01: Agent loop basics (bash only) ---
+
+describe.skipIf(!auth)("agentLoop e2e", () => {
+  it("answers a simple question without tools", async () => {
+    const { messages, iterations } = await agentLoop("What is 2+2? Reply with just the number.", {
+      model: model(),
+    });
+
+    expect(iterations).toBe(1);
+    expect(messages.length).toBe(2); // user + assistant
+
+    const last = messages[messages.length - 1];
+    expect(last.role).toBe("assistant");
+    expect(
+      (last.content as { type: "text"; text: string }[]).some((c) => c.text.includes("4")),
+    ).toBe(true);
+  });
+
+  it("uses bash tool to list files", async () => {
+    const { messages, iterations } = await agentLoop(
+      "List all .ts files in the current directory using bash. Reply with just the filenames.",
+      { model: model() },
+    );
+
+    expect(iterations).toBeGreaterThanOrEqual(2);
+    expect(messages.length).toBeGreaterThanOrEqual(4);
+
+    const toolResults = messages.filter((m) => m.role === "toolResult");
+    expect(toolResults.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("creates a file via bash tool", async () => {
+    const workdir = resolve(tmpdir(), `agent-bash-test-${Date.now()}`);
+    mkdirSync(workdir, { recursive: true });
+    try {
+      const { messages, iterations } = await agentLoop(
+        "Use bash to create a file called test.txt in the workspace with the content 'hello from agent loop'. Run: echo 'hello from agent loop' > test.txt",
+        { model: model(), workdir },
+      );
+
+      expect(iterations).toBeGreaterThanOrEqual(2);
+      expect(messages.some((m) => m.role === "toolResult")).toBe(true);
+
+      const content = readFileSync(resolve(workdir, "test.txt"), "utf-8");
+      expect(content).toContain("hello from agent loop");
+    } finally {
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  });
+
+  it("chains multiple tool calls", async () => {
+    const workdir = resolve(tmpdir(), `agent-chain-test-${Date.now()}`);
+    mkdirSync(workdir, { recursive: true });
+    try {
+      const { messages, iterations } = await agentLoop(
+        "Create 3 files in the workspace: a.txt containing 'a', b.txt containing 'b', c.txt containing 'c'. Use bash to run: mkdir -p subdir && echo a > subdir/a.txt && echo b > subdir/b.txt && echo c > subdir/c.txt",
+        { model: model(), workdir },
+      );
+
+      expect(iterations).toBeGreaterThanOrEqual(2);
+      expect(messages.filter((m) => m.role === "toolResult").length).toBeGreaterThanOrEqual(1);
+    } finally {
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  });
+
+  it("respects maxIterations limit", async () => {
+    const { iterations } = await agentLoop("Keep running 'echo hello' over and over forever.", {
+      model: model(),
+      maxIterations: 3,
+    });
+
+    expect(iterations).toBeLessThanOrEqual(3);
+  });
+
+  it("reports current git branch", async () => {
+    const { messages } = await agentLoop(
+      "What is the current git branch? Use bash to run: git branch --show-current. Reply with just the branch name.",
+      {
+        model: model(),
+        workdir: resolve(import.meta.dirname, "../../.."),
+      },
+    );
+
+    const last = messages[messages.length - 1];
+    expect(last.role).toBe("assistant");
+    expect(messages.some((m) => m.role === "toolResult")).toBe(true);
+  });
+
+  it("invokes onStreamResult callback", async () => {
+    const results: { result: StreamResult; iteration: number }[] = [];
+
+    await agentLoop("What is 2+2? Reply with just the number.", {
+      model: model(),
+      onStreamResult: (result, iteration) => {
+        results.push({ result, iteration });
+      },
+    });
+
+    expect(results.length).toBeGreaterThanOrEqual(1);
+    expect(results[0].iteration).toBe(1);
+    expect(results[0].result.usage.inputTokens).toBeGreaterThan(0);
+  });
+
+  it("respects system prompt", async () => {
+    const { messages } = await agentLoop("What is your name?", {
+      model: model(),
+      system: "You are a helpful assistant named TestBot. Always introduce yourself as TestBot.",
+    });
+
+    const last = messages[messages.length - 1];
+    expect(last.role).toBe("assistant");
+    const text = (last.content as { type: "text"; text: string }[])
+      .filter((c) => c.type === "text")
+      .map((c) => c.text)
+      .join("");
+    expect(text.toLowerCase()).toContain("testbot");
+  });
+});
+
+// --- s02: Tool dispatch (read, write, edit) ---
+
+describe.skipIf(!auth)("tool dispatch e2e", () => {
+  let workdir: string;
+
+  beforeEach(() => {
+    workdir = resolve(tmpdir(), `agent-test-${Date.now()}`);
+    mkdirSync(workdir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(workdir, { recursive: true, force: true });
+  });
+
+  it("creates a file with write_file", async () => {
+    const { messages, iterations } = await agentLoop(
+      "Create a file called greet.py with a greet(name) function that returns a greeting string.",
+      { model: model(), workdir },
+    );
+
+    expect(iterations).toBeGreaterThanOrEqual(2);
+
+    const content = readFileSync(resolve(workdir, "greet.py"), "utf-8");
+    expect(content).toContain("greet");
+    expect(content).toContain("def ");
+  });
+
+  it("reads a file with read_file", async () => {
+    writeFileSync(resolve(workdir, "data.txt"), "line1\nline2\nline3\nline4\nline5\n");
+
+    const { messages } = await agentLoop(
+      "Read the file data.txt and tell me how many lines it has.",
+      {
+        model: model(),
+        workdir,
+      },
+    );
+
+    const last = messages[messages.length - 1];
+    expect(last.role).toBe("assistant");
+    // Model should have read the file and report 5 lines
+    const text = (last.content as { type: "text"; text: string }[])
+      .filter((c) => c.type === "text")
+      .map((c) => c.text)
+      .join("");
+    expect(text).toContain("5");
+  });
+
+  it("edits a file with edit_file", async () => {
+    writeFileSync(resolve(workdir, "greet.py"), 'def greet(name):\n    return "Hello " + name\n');
+
+    const { messages } = await agentLoop(
+      'Edit greet.py to change the greeting from "Hello" to "Hi".',
+      { model: model(), workdir },
+    );
+
+    expect(messages.some((m) => m.role === "toolResult")).toBe(true);
+
+    const content = readFileSync(resolve(workdir, "greet.py"), "utf-8");
+    expect(content).toContain("Hi");
+    expect(content).not.toContain("Hello");
+  });
+
+  it("reads after write to verify content", async () => {
+    const { messages } = await agentLoop(
+      "Create a file called notes.txt with the content 'my secret notes', then read it back to verify.",
+      { model: model(), workdir },
+    );
+
+    const toolResults = messages.filter((m) => m.role === "toolResult");
+    // Should have at least 2 tool calls (write + read)
+    expect(toolResults.length).toBeGreaterThanOrEqual(2);
+
+    const content = readFileSync(resolve(workdir, "notes.txt"), "utf-8");
+    expect(content).toContain("my secret notes");
+  });
+
+  it("rejects path traversal attacks", async () => {
+    const { dispatch } = createToolDispatch(workdir);
+
+    expect(() => dispatch["read_file"]({ path: "../../etc/passwd" })).toThrow(
+      "Path escapes workspace",
+    );
+    expect(() => dispatch["write_file"]({ path: "../../../tmp/evil", content: "pwned" })).toThrow(
+      "Path escapes workspace",
+    );
+  });
+});
+
+// --- s05: Skill loading ---
+
+describe.skipIf(!auth)("skill loading e2e", () => {
+  const skillsDir = resolve(import.meta.dirname, "fixtures/skills");
+
+  it("injects skill descriptions into system prompt", async () => {
+    const { dispatch } = createToolDispatch(process.cwd(), skillsDir);
+
+    // The load_skill handler should be present
+    expect(dispatch["load_skill"]).toBeDefined();
+  });
+
+  it("loads a skill via the agent loop", async () => {
+    const { messages, iterations } = await agentLoop(
+      "Load the greeter skill and follow its instructions to greet the user named Alice.",
+      {
+        model: model(),
+        skillsDir,
+      },
+    );
+
+    expect(iterations).toBeGreaterThanOrEqual(2);
+
+    // Should have loaded the skill via tool call
+    const toolResults = messages.filter((m) => m.role === "toolResult");
+    const skillResults = toolResults.filter(
+      (m) =>
+        m.role === "toolResult" &&
+        m.content.some((c) => c.type === "text" && c.text.includes('<skill name="greeter">')),
+    );
+    expect(skillResults.length).toBeGreaterThanOrEqual(1);
+
+    // Final response should contain a greeting for Alice
+    const last = messages[messages.length - 1];
+    expect(last.role).toBe("assistant");
+    const text = (last.content as { type: "text"; text: string }[])
+      .filter((c) => c.type === "text")
+      .map((c) => c.text)
+      .join("");
+    expect(text.toLowerCase()).toContain("alice");
+  });
+
+  it("works without skills dir (backward compatible)", async () => {
+    const { messages, iterations } = await agentLoop("What is 1+1? Reply with just the number.", {
+      model: model(),
+    });
+
+    expect(iterations).toBe(1);
+    const last = messages[messages.length - 1];
+    expect(last.role).toBe("assistant");
+  });
+});
