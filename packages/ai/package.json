@@ -27,7 +27,7 @@
     "generate-models": "tsx scripts/generate-models.ts"
   },
   "devDependencies": {
-    "@bookingcare/tsconfig": "^0.2.0",
+    "@bookingcare/tsconfig": "workspace:*",
     "@types/node": "^25.6.2",
     "typescript": "^5.8.0",
     "vitest": "^4.1.5"

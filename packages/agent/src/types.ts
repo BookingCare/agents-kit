@@ -1,5 +1,18 @@
-import type { Api, Model, StreamResult, Tool } from "@bookingcare/ai";
+import type {
+  Api,
+  AssistantMessageEventStream,
+  ImageContent,
+  Message,
+  Model,
+  SimpleStreamOptions,
+  Static,
+  StreamResult,
+  TSchema,
+  Tool,
+  ToolCall,
+} from "@bookingcare/ai";
 import type { SkillLoader } from "./skill-loader.js";
+import type { TodoManager } from "./todo-manager.js";
 
 // --- Agent loop ---
 
@@ -23,7 +36,150 @@ export interface ToolDispatch {
   tools: Tool[];
   dispatch: Record<string, ToolHandler>;
   skillLoader?: SkillLoader;
+  todoManager?: TodoManager;
 }
+
+// --- Streaming agent loop ---
+
+export type StreamFn = (
+  model: Model<Api>,
+  context: { messages: Message[]; tools?: Tool[] },
+  options?: SimpleStreamOptions,
+) => AssistantMessageEventStream;
+
+export type ToolExecutionMode = "parallel" | "sequential";
+
+/** Hook context and result types for before/after tool call hooks. */
+export interface BeforeToolCallContext {
+  toolName: string;
+  args: Record<string, unknown>;
+  toolCallId: string;
+}
+
+export type BeforeToolCallResult =
+  | { action: "continue" }
+  | { action: "skip"; result?: string }
+  | { action: "replace"; args: Record<string, unknown> };
+
+export interface AfterToolCallContext {
+  toolName: string;
+  args: Record<string, unknown>;
+  toolCallId: string;
+  result: string;
+}
+
+export type AfterToolCallResult = { action: "continue" } | { action: "replace"; result: string };
+
+export interface AgentLoopTurnUpdate {
+  model?: Model<Api>;
+  tools?: AgentTool[];
+  systemPrompt?: string;
+}
+
+export interface AgentLoopConfig {
+  model: Model<Api>;
+  maxTokens?: number;
+  reasoning?: string;
+  sessionId?: string;
+  onPayload?: SimpleStreamOptions["onPayload"];
+  onResponse?: SimpleStreamOptions["onResponse"];
+  transport?: import("@bookingcare/ai").Transport;
+  thinkingBudgets?: unknown;
+  maxRetryDelayMs?: number;
+  toolExecution: ToolExecutionMode;
+  beforeToolCall?: (
+    context: BeforeToolCallContext,
+    signal?: AbortSignal,
+  ) => Promise<BeforeToolCallResult | undefined>;
+  afterToolCall?: (
+    context: AfterToolCallContext,
+    signal?: AbortSignal,
+  ) => Promise<AfterToolCallResult | undefined>;
+  prepareNextTurn?: (signal?: AbortSignal) => Promise<AgentLoopTurnUpdate | undefined>;
+  convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
+  transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  getSteeringMessages: () => Promise<AgentMessage[]>;
+  getFollowUpMessages: () => Promise<AgentMessage[]>;
+}
+
+// --- Agent tool execution ---
+
+/** Result returned by an AgentTool's execute method. */
+export interface AgentToolResult {
+  content: string;
+  isError?: boolean;
+}
+
+/** Callback for streaming progress updates from a tool execution. */
+export type AgentToolUpdateCallback = (update: string) => void;
+
+/** Tool definition used by the agent runtime. */
+export interface AgentTool<TParameters extends TSchema = TSchema> extends Tool<TParameters> {
+  /** Human-readable label for UI display. */
+  label: string;
+  /**
+   * Optional compatibility shim for raw tool-call arguments before schema validation.
+   * Must return an object that matches `TParameters`.
+   */
+  prepareArguments?: (args: unknown) => Static<TParameters>;
+  /** Execute the tool call. Throw on failure instead of encoding errors in `content`. */
+  execute: (
+    toolCallId: string,
+    params: Static<TParameters>,
+    signal?: AbortSignal,
+    onUpdate?: AgentToolUpdateCallback,
+  ) => Promise<AgentToolResult>;
+  /**
+   * Per-tool execution mode override.
+   * - "sequential": this tool must execute one at a time with other tool calls.
+   * - "parallel": this tool can execute concurrently with other tool calls.
+   *
+   * If omitted, the default execution mode applies.
+   */
+  executionMode?: ToolExecutionMode;
+}
+
+// --- Agent class types ---
+
+/** Agent messages are `Message` from `@bookingcare/ai`. Alias for semantic clarity. */
+export type AgentMessage = Message;
+
+/** Streaming partial of an AssistantMessage, used during text delta accumulation. */
+export interface StreamingAssistantMessage {
+  role: "assistant";
+  content: string;
+  timestamp: number;
+}
+
+export interface AgentState {
+  systemPrompt: string;
+  model: Model<Api>;
+  thinkingLevel: string;
+  tools: AgentTool[];
+  messages: AgentMessage[];
+  isStreaming: boolean;
+  streamingMessage?: StreamingAssistantMessage;
+  pendingToolCalls: ReadonlySet<string>;
+  errorMessage?: string;
+}
+
+export type AgentEvent =
+  | { type: "message_start"; message: StreamingAssistantMessage }
+  | { type: "message_update"; message: StreamingAssistantMessage }
+  | { type: "message_end"; message: AgentMessage }
+  | { type: "tool_execution_start"; toolCallId: string }
+  | { type: "tool_execution_end"; toolCallId: string }
+  | { type: "turn_end"; message: AgentMessage; toolResults: AgentMessage[] }
+  | { type: "agent_end"; messages: AgentMessage[] };
+
+export interface AgentContext {
+  systemPrompt: string;
+  messages: AgentMessage[];
+  tools: AgentTool[];
+}
+
+export type QueueMode = "all" | "one-at-a-time";
 
 // --- Skill loading ---
 

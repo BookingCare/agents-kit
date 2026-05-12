@@ -273,3 +273,41 @@ describe.skipIf(!auth)("skill loading e2e", () => {
     expect(last.role).toBe("assistant");
   });
 });
+
+// --- Todo tracking ---
+
+describe.skipIf(!auth)("todo tracking e2e", () => {
+  it("uses todo tool to plan a multi-step task", async () => {
+    const { messages, iterations } = await agentLoop(
+      "Create a plan with 3 tasks: plan, code, test. Use the todo tool to create the list.",
+      { model: model() },
+    );
+
+    expect(iterations).toBeGreaterThanOrEqual(2);
+
+    // Should have at least one todo tool call
+    const toolResults = messages.filter((m) => m.role === "toolResult" && m.toolName === "todo");
+    expect(toolResults.length).toBeGreaterThanOrEqual(1);
+
+    // The todo result should contain formatted items
+    const todoResult = toolResults[0];
+    const text = (todoResult.content as { type: "text"; text: string }[])
+      .filter((c) => c.type === "text")
+      .map((c) => c.text)
+      .join("");
+    expect(text).toContain("[ ]");
+    expect(text).toContain("plan");
+  });
+
+  it("tracks progress through task completion", async () => {
+    const { messages } = await agentLoop(
+      "Create a todo list with 2 tasks: 'write code' and 'write tests'. " +
+        "Then mark 'write code' as in_progress, then completed. Use the todo tool for each step.",
+      { model: model() },
+    );
+
+    const todoResults = messages.filter((m) => m.role === "toolResult" && m.toolName === "todo");
+    // Should have multiple todo calls (create -> update in_progress -> update completed)
+    expect(todoResults.length).toBeGreaterThanOrEqual(2);
+  });
+});

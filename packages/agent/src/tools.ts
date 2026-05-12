@@ -4,6 +4,8 @@ import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { SkillLoader } from "./skill-loader.js";
+import { TodoManager } from "./todo-manager.js";
+import type { TodoItem } from "./todo-manager.js";
 import type { ToolHandler, ToolDispatch } from "./types.js";
 
 export type { ToolHandler, ToolDispatch } from "./types.js";
@@ -122,9 +124,31 @@ function runEdit(path: string, oldText: string, newText: string, workdir: string
   return `Edited ${path}: replaced ${oldText.length} chars with ${newText.length} chars`;
 }
 
+// --- Todo tool ---
+
+export const todoTool = tool({
+  name: "todo",
+  description:
+    "Update the task list to track progress on multi-step tasks. Mark in_progress before starting work, completed when done.",
+  parameters: Type.Object({
+    items: Type.Array(
+      Type.Object({
+        id: Type.String({ description: "Unique identifier for the task" }),
+        text: Type.String({ description: "Task description" }),
+        status: Type.Union([
+          Type.Literal("pending"),
+          Type.Literal("in_progress"),
+          Type.Literal("completed"),
+        ]),
+      }),
+      { description: "The full list of todo items (replaces previous list)" },
+    ),
+  }),
+});
+
 // --- Dispatch ---
 
-const baseTools = [bashTool, readFileTool, writeFileTool, editFileTool];
+const baseTools = [bashTool, readFileTool, writeFileTool, editFileTool, todoTool];
 
 /**
  * Create a tool dispatch table bound to a workspace directory.
@@ -137,12 +161,15 @@ export function createToolDispatch(
 ): ToolDispatch {
   const skillLoader = skillsDir ? new SkillLoader(skillsDir) : undefined;
 
+  const todoManager = new TodoManager();
+
   const dispatch: Record<string, ToolHandler> = {
     bash: (args) => runBash(args.command as string, workdir),
     read_file: (args) => runRead(args.path as string, workdir, args.limit as number | undefined),
     write_file: (args) => runWrite(args.path as string, args.content as string, workdir),
     edit_file: (args) =>
       runEdit(args.path as string, args.old_text as string, args.new_text as string, workdir),
+    todo: (args) => todoManager.update(args.items as TodoItem[]),
     ...(skillLoader && {
       load_skill: (args) => skillLoader.getContent(args.name as string),
     }),
@@ -150,5 +177,5 @@ export function createToolDispatch(
 
   const tools = skillLoader ? [...baseTools, loadSkillTool] : [...baseTools];
 
-  return { tools, dispatch, skillLoader };
+  return { tools, dispatch, skillLoader, todoManager };
 }
