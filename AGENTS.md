@@ -19,9 +19,9 @@
 
 ## Commands
 
-- After code changes (not documentation changes): `npm run check` (get full output, no tail). fix all errors, warnings, and infos before committings.
-- Note: `npm run check` does not run tests.
-- NEVER run: `npm run dev`, `npm run build`, `npm test`
+- After code changes (not documentation changes): `pnpm check` (get full output, no tail). fix all errors, warnings, and infos before committings.
+- Note: `pnpm check` does not run tests.
+- NEVER run: `pnpm dev`, `pnpm build`, `pnpm test`
 - Only run specific tests if user instructs: `npx tsx ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts`
 - Run tests from package root, not the repo root.
 - If you create or modify a test file, you MUST run that test file and iterate until it passes.
@@ -164,8 +164,8 @@ Include message/tool conversion functions and response parsing that emits standa
 
 2. **Run release script**:
    ```
-   npm run release:patch # Fixes and additions
-   npm run release:minor # API breaking changes
+   pnpm release:patch # Fixes and additions
+   pnpm release:minor # API breaking changes
    ```
 
 ## **CRITICAL** Git Rules for Parallell Agents **CRITICAL**

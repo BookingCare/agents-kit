@@ -13,7 +13,7 @@ import type {
 } from "./types.js";
 import type { AssistantMessageEventStream } from "./utils/event-stream.js";
 import { getModel } from "./models.generated.js";
-import { resolveApiProvider } from "./provider-registry.js";
+import { getApiProvider } from "./api-registry.js";
 import { registerBuiltinProviders } from "./providers/register-builtins.js";
 import { calculateCost } from "./utils/costs.js";
 
@@ -28,7 +28,10 @@ export function stream<TApi extends Api>(
   context: Context,
   options?: StreamOptions,
 ): AssistantMessageEventStream {
-  const provider = resolveApiProvider(model.api);
+  const provider = getApiProvider(model.api);
+  if (!provider) {
+    throw new Error(`No provider registered for API: "${model.api}"`);
+  }
   return provider.stream(model, context, options);
 }
 
@@ -41,7 +44,10 @@ export function streamSimple<TApi extends Api>(
   context: Context,
   options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
-  const provider = resolveApiProvider(model.api);
+  const provider = getApiProvider(model.api);
+  if (!provider) {
+    throw new Error(`No provider registered for API: "${model.api}"`);
+  }
   return provider.streamSimple(model, context, options);
 }
 

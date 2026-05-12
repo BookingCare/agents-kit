@@ -2,13 +2,13 @@
 
 ## All Packages
 
-| Package | Description |
-|---------|-------------|
+| Package                            | Description                                              |
+| ---------------------------------- | -------------------------------------------------------- |
 | **[@BookingCare/ai](packages/ai)** | Unified multi-provider LLM API (openAI, Anthropic, etc.) |
 
 ## Contributing
 
-See [CONTRIBUTTING.md](CONTRIBUTTING.md) for contributtion guidelines and [AGENTS.md](AGENTS.md) for project-specifice rules (for both humans and agents).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributtion guidelines and [AGENTS.md](AGENTS.md) for project-specifice rules (for both humans and agents).
 
 ## Developement
 

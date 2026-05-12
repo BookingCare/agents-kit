@@ -57,9 +57,11 @@ function stream<TApi extends Api>(
 ): AssistantMessageEventStream;
 ```
 
-- **Model** — carries API type, provider, base URL, pricing, and compat overrides. The provider is resolved from `model.api`.
+- **Model** — carries API type, provider, base URL, pricing, and compat overrides. The provider is resolved from `model.api` via the API registry.
 - **Context** — content-level: `{ messages: Message[]; tools?: Tool[] }`. Separates what is being asked from how it is transported.
 - **StreamOptions** — transport-level control: `temperature`, `maxTokens`, `topP`, `stopSequences`, `signal`, `apiKey`, `transport`, `cacheRetention`, `sessionId`, `onPayload`, `onResponse`, `headers`, `timeoutMs`, `maxRetries`, `maxRetryDelayMs`, `metadata`.
+
+Providers implement `StreamFunction<TApi, TOptions>` — a typed function `(model, context, options?) => AssistantMessageEventStream` that encodes all errors into the stream.
 
 ## Streaming vs Collecting
 
@@ -218,6 +220,14 @@ const azureModels = getModelsByProvider("azure-openai");
 
 ## Providers
 
+Providers implement the `ApiProvider<TApi, TOptions>` interface and register via `registerApiProvider()`. Each provider declares:
+
+- `api` — the API type string (e.g. `"azure-openai-completions"`)
+- `stream` — a `StreamFunction<TApi, TOptions>` for streaming completions
+- `streamSimple` — a `StreamFunction<TApi, SimpleStreamOptions>` for simple completions
+
+The `StreamFunction` contract guarantees that all errors are encoded into the returned stream (never thrown), with `stopReason: "error" | "aborted"` and an `errorMessage`.
+
 ### Azure OpenAI
 
 Configure via environment variables:
@@ -300,13 +310,25 @@ List all registered models.
 
 List models filtered by provider name.
 
-### `registerProvider(api, provider): void`
+### `registerApiProvider(provider, sourceId?): void`
 
-Register a provider implementation for an API type.
+Register a typed API provider. `provider` must be an `ApiProvider<TApi, TOptions>` with `api`, `stream`, and `streamSimple` fields. Optional `sourceId` enables batch removal via `unregisterApiProviders()`.
 
-### `listApis(): string[]`
+### `getApiProvider(api): ApiProviderInternal | undefined`
 
-List registered API types.
+Look up a registered provider by API type.
+
+### `getApiProviders(): ApiProviderInternal[]`
+
+List all registered API providers.
+
+### `unregisterApiProviders(sourceId): void`
+
+Remove all providers registered with the given `sourceId`.
+
+### `clearApiProviders(): void`
+
+Remove all registered providers.
 
 ### `isTextContent(content): boolean`
 
