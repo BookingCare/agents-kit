@@ -3,7 +3,7 @@ import { stream, collectStream, streamSimple, complete, completeSimple } from ".
 import { Conversation } from "../src/context.js";
 import { getModel, listModels, getModelsByProvider } from "../src/models.generated.js";
 import { calculateCost } from "../src/utils/costs.js";
-import { listApis } from "../src/provider-registry.js";
+import { getApiProviders } from "../src/api-registry.js";
 import type { Model, Usage, Tool } from "../src/types.js";
 import { Type } from "@sinclair/typebox";
 import { applyAuth } from "./helpers/auth.js";
@@ -75,9 +75,10 @@ describe("Cost Calculation", () => {
   });
 });
 
-describe("Provider Registry", () => {
+describe("API Registry", () => {
   it("has azure-openai-completions API registered", () => {
-    const apis = listApis();
+    const providers = getApiProviders();
+    const apis = providers.map((p) => p.api);
     expect(apis).toContain("azure-openai-completions");
   });
 });

@@ -26,13 +26,13 @@ export type {
   CacheRetention,
   ProviderResponse,
   Context,
-  ProviderApi,
   AzureOpenAIStreamOptions,
   OpenAIStreamOptions,
   AnthropicStreamOptions,
   ApiOptionsMap,
   StreamOptions,
   ProviderStreamOptions,
+  StreamFunction,
   SimpleStreamOptions,
   Usage,
   Cost,
@@ -56,8 +56,15 @@ export {
 // Model discovery
 export { getModel, listModels, getModelsByProvider } from "./models.generated.js";
 
-// Provider registry
-export { registerProvider, listApis } from "./provider-registry.js";
+// API provider registry
+export {
+  registerApiProvider,
+  getApiProvider,
+  getApiProviders,
+  unregisterApiProviders,
+  clearApiProviders,
+} from "./api-registry.js";
+export type { ApiStreamFunction, ApiStreamSimpleFunction, ApiProvider } from "./api-registry.js";
 
 // Cost calculation
 export { calculateCost } from "./utils/costs.js";

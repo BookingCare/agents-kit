@@ -90,6 +90,7 @@ export type Message = SystemMessage | UserMessage | AssistantMessage | ToolResul
 // === Tools ===
 
 import type { TSchema } from "@sinclair/typebox";
+import { AssistantMessageEventStream } from "./index.js";
 
 export interface Tool<TParams extends TSchema = TSchema> {
   name: string;
@@ -327,31 +328,24 @@ export interface StreamOptions {
 /** Provider-extensible stream options. */
 export type ProviderStreamOptions = StreamOptions & Record<string, unknown>;
 
-/**
- * A provider implementation for a specific API.
- * Registered by API type and resolved via `resolveApiProvider(model.api)`.
- */
-export interface ProviderApi {
-  /** Stream a completion, yielding standardized events. */
-  stream<TApi extends Api>(
-    model: Model<TApi>,
-    context: Context,
-    options?: StreamOptions,
-  ): import("./utils/event-stream.js").AssistantMessageEventStream;
-
-  /** Stream a simple completion (prompt-in, stream-out). */
-  streamSimple<TApi extends Api>(
-    model: Model<TApi>,
-    context: Context,
-    options?: StreamOptions,
-  ): import("./utils/event-stream.js").AssistantMessageEventStream;
-}
+// Generic StreamFunction with typed options.
+//
+// Contract:
+// - Must return an AssistantMessageEventStream.
+// - Once invoked, request/model/runtime failures should be encoded in the
+//   returned stream, not thrown.
+// - Error termination must produce an AssistantMessage with stopReason
+//   "error" or "aborted" and errorMessage, emitted via the stream protocol.
+export type StreamFunction<
+  TApi extends Api = Api,
+  TOptions extends StreamOptions = StreamOptions,
+> = (model: Model<TApi>, context: Context, options?: TOptions) => AssistantMessageEventStream;
 
 // === Provider-Specific Options ===
 
 export interface AzureOpenAIStreamOptions extends StreamOptions {
-  endpoint: string;
-  apiVersion?: string;
+  azureEndpoint?: string;
+  azureApiVersion?: string;
 }
 
 export interface OpenAIStreamOptions extends StreamOptions {

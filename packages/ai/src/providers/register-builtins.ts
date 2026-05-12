@@ -1,5 +1,5 @@
-import { registerProvider } from "../provider-registry.js";
-import { azureOpenAIProvider } from "./azure-openai.js";
+import { registerApiProvider } from "../api-registry.js";
+import { azureOpenAIProvider, type AzureOpenAICompletionsOptions } from "./azure-openai.js";
 
 let registered = false;
 
@@ -7,5 +7,9 @@ export function registerBuiltinProviders(): void {
   if (registered) return;
   registered = true;
 
-  registerProvider("azure-openai-completions", azureOpenAIProvider);
+  registerApiProvider<"azure-openai-completions", AzureOpenAICompletionsOptions>({
+    api: "azure-openai-completions",
+    stream: azureOpenAIProvider.stream,
+    streamSimple: azureOpenAIProvider.streamSimple,
+  });
 }

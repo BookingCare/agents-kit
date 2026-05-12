@@ -1,5 +1,32 @@
 # @agents-kit/ai
 
+## [Unreleased]
+
+### Breaking Changes
+
+- Removed `ProviderApi` interface. Providers now implement `ApiProvider<TApi, TOptions>` and register via `registerApiProvider()`.
+- Replaced `registerProvider(api, provider)` with `registerApiProvider(provider, sourceId?)`.
+- Replaced `resolveApiProvider(api)` with `getApiProvider(api)`.
+- Replaced `listApis()` with `getApiProviders()`.
+- Renamed `provider-registry.ts` to `api-registry.ts`.
+- `AzureOpenAIStreamOptions` fields renamed: `endpoint` -> `azureEndpoint`, `apiVersion` -> `azureApiVersion` (both now optional).
+
+### Added
+
+- `StreamFunction<TApi, TOptions>` type: typed contract for provider stream functions with error-in-stream guarantees.
+- `ApiProvider<TApi, TOptions>` interface: providers declare their `api`, `stream`, and `streamSimple` with full type specificity.
+- `ApiStreamFunction` and `ApiStreamSimpleFunction` types for the registry's internal storage.
+- `getApiProviders()`: list all registered API providers.
+- `unregisterApiProviders(sourceId)`: remove providers by source ID.
+- `clearApiProviders()`: remove all registered providers.
+- Runtime API mismatch guard: `wrapStream`/`wrapStreamSimple` validate `model.api` matches the registered API type.
+- Azure OpenAI provider exports typed `streamAzureOpenAICompletions` and `streamSimpleAzureOpenAICompletions` as `StreamFunction` instances.
+
+### Changed
+
+- Azure OpenAI provider refactored from monolithic function to `StreamFunction` pattern with extracted `buildParams()` and `createClient()` helpers.
+- Azure OpenAI provider exports a plain `{ api, stream, streamSimple }` object instead of a `ProviderApi`-typed object.
+
 ## [0.2.0] - 2026-05-11
 
 ### Breaking Changes
