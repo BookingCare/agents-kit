@@ -122,6 +122,16 @@ The top-level `body` must include:
 - Issue counts in the format `Found: X critical, Y important, Z suggestions`.
 - A final recommendation of `Approve`, `Approve with nits`, or `Request changes`. This recommendation must match the top-level `verdict` field (`Approve` / `Approve with nits` → `"APPROVE"`; `Request changes` → `"REJECT"`).
 
+## Formatting Reminder
+
+Before validating JSON, ensure markdown spec files are formatted:
+
+- If spec files were modified or created during review, run:
+  ```
+  npx prettier --write specs/**/*.md
+  ```
+- This prevents pre-commit hook failures when committing the updated spec files.
+
 ## Final Checks
 
 Before finishing:
