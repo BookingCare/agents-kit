@@ -243,8 +243,14 @@ async function loop(
   let iterationCount = 0;
 
   for (;;) {
-    if (signal.aborted) return;
-    if (maxIterations !== undefined && ++iterationCount > maxIterations) return;
+    if (signal.aborted) {
+      await emit({ type: "agent_end", messages: messages.slice() });
+      return;
+    }
+    if (maxIterations !== undefined && ++iterationCount > maxIterations) {
+      await emit({ type: "agent_end", messages: messages.slice() });
+      return;
+    }
 
     // Allow mid-loop updates (model swap, tool changes, etc.)
     const update = await config.prepareNextTurn?.(signal);

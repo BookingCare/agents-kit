@@ -2,7 +2,7 @@ import type { Tool } from "@bookingcare/ai";
 import { Type, tool } from "@bookingcare/ai";
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, relative, isAbsolute } from "node:path";
 import { SkillLoader } from "./skill-loader.js";
 import { TodoManager } from "./todo-manager.js";
 import type { TodoItem } from "./todo-manager.js";
@@ -13,8 +13,10 @@ export type { ToolHandler, ToolDispatch } from "./types.js";
 // --- Path sandboxing ---
 
 function safePath(path: string, workdir: string): string {
-  const resolved = resolve(workdir, path);
-  if (!resolved.startsWith(resolve(workdir))) {
+  const root = resolve(workdir);
+  const resolved = resolve(root, path);
+  const rel = relative(root, resolved);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(`Path escapes workspace: ${path}`);
   }
   return resolved;
