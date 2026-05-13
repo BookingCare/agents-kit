@@ -296,6 +296,12 @@ describe("JSONStore", () => {
 
       await expect(store.loadInfo(sessionId)).rejects.toThrow(CorruptDataError);
     });
+
+    it("throws StoreError for path traversal in sessionId", async () => {
+      await expect(store.loadMessages("../etc")).rejects.toThrow(StoreError);
+      await expect(store.saveMessages("../../outside", [])).rejects.toThrow(StoreError);
+      await expect(store.delete("../secret")).rejects.toThrow(StoreError);
+    });
   });
 
   describe("create", () => {

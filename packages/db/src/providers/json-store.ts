@@ -34,7 +34,11 @@ export class JSONStore implements Store {
   }
 
   private getSessionDir(sessionId: string): string {
-    return path.join(this.options.baseDir, sessionId);
+    const resolved = path.resolve(this.options.baseDir, sessionId);
+    if (!resolved.startsWith(path.resolve(this.options.baseDir) + path.sep)) {
+      throw new StoreError(`Invalid sessionId: ${sessionId}`);
+    }
+    return resolved;
   }
 
   private async ensureSessionDir(sessionId: string): Promise<string> {
@@ -56,7 +60,10 @@ export class JSONStore implements Store {
       if (errno.code === "ENOENT") {
         return undefined;
       }
-      throw new CorruptDataError(sessionId, error);
+      if (error instanceof SyntaxError) {
+        throw new CorruptDataError(sessionId, error);
+      }
+      throw new StoreError(`Failed to read data for session: ${sessionId}`, error);
     }
   }
 

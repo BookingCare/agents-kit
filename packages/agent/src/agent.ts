@@ -667,7 +667,13 @@ export class Agent {
         this._state.messages = event.messages.slice();
         this._state.streamingMessage = undefined;
 
-        await this.persistSession(event.messages);
+        try {
+          await this.persistSession(event.messages);
+        } catch (err) {
+          console.warn(
+            `[agent] persistence failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
         break;
     }
 
