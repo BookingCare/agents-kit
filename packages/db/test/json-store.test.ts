@@ -302,6 +302,11 @@ describe("JSONStore", () => {
       await expect(store.saveMessages("../../outside", [])).rejects.toThrow(StoreError);
       await expect(store.delete("../secret")).rejects.toThrow(StoreError);
     });
+
+    it("throws StoreError for path separators in sessionId", async () => {
+      await expect(store.loadMessages("a/b")).rejects.toThrow(StoreError);
+      await expect(store.saveMessages("a\\b", [])).rejects.toThrow(StoreError);
+    });
   });
 
   describe("create", () => {

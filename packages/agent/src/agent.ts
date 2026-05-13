@@ -256,7 +256,7 @@ export class Agent {
       store: Store;
       model?: Model<Api>;
       todoManager?: TodoManager;
-    } & Omit<AgentOptions, "store" | "sessionId" | "todoManager">,
+    } & Omit<AgentOptions, "store" | "sessionId" | "todoManager" | "initialState">,
   ): Promise<Agent> {
     const { sessionId, store, model: providedModel, todoManager, ...agentOptions } = options;
 

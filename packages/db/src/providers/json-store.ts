@@ -34,6 +34,9 @@ export class JSONStore implements Store {
   }
 
   private getSessionDir(sessionId: string): string {
+    if (sessionId.includes("/") || sessionId.includes("\\")) {
+      throw new StoreError(`Invalid sessionId: ${sessionId}`);
+    }
     const resolved = path.resolve(this.options.baseDir, sessionId);
     if (!resolved.startsWith(path.resolve(this.options.baseDir) + path.sep)) {
       throw new StoreError(`Invalid sessionId: ${sessionId}`);

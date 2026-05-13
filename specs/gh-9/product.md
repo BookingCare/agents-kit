@@ -44,7 +44,7 @@ The following existing code continues to work without modification:
 import { Agent } from "@bookingcare/agent";
 
 // No Store provided = in-memory behavior (unchanged)
-const agent = new Agent({ model: "anthropic/claude-3-5-sonnet" });
+const agent = new Agent({ initialState: { model: getModel("anthropic/claude-3-5-sonnet") } });
 // ... session ends, state is lost
 ```
 
@@ -61,7 +61,9 @@ const store = await JSONStore.create({ baseDir: "./data/agents" });
 
 // Agent with persistence enabled
 const agent = new Agent({
-  model: "anthropic/claude-3-5-sonnet",
+  initialState: {
+    model: getModel("anthropic/claude-3-5-sonnet"),
+  },
   store,
 });
 ```
@@ -71,7 +73,7 @@ const agent = new Agent({
 When a `Store` is provided, persistence happens automatically:
 
 - **Session save**: On `agent_end` event, the complete `AgentState` is saved
-- **Message append**: Each message (user/assistant/system) is appended to the message store
+- **Message overwrite**: Each message transcript (user/assistant/system) overwrites the previous store contents
 - **Todo persistence**: Todo state is saved when changed
 - **Agent info**: Session metadata (model, config, timestamps) is saved
 
@@ -129,10 +131,10 @@ import { Store, LoadMessagesOptions } from "@bookingcare/db";
 
 class CustomStore implements Store {
   // Implement all Store methods
-  async saveMessages(agentId: string, messages: Message[]) {
+  async saveMessages(sessionId: string, messages: Message[]) {
     /* ... */
   }
-  async loadMessages(agentId: string, opts?: LoadMessagesOptions): Promise<Message[]> {
+  async loadMessages(sessionId: string, opts?: LoadMessagesOptions): Promise<Message[]> {
     /* ... */
   }
   // ... other methods

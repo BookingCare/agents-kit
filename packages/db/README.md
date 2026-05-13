@@ -41,20 +41,20 @@ All storage backends implement `Store`:
 ```typescript
 interface Store {
   // Messages
-  saveMessages(agentId: string, messages: Message[]): Promise<void>;
-  loadMessages(agentId: string, opts?: LoadMessagesOptions): Promise<Message[]>;
+  saveMessages(sessionId: string, messages: Message[]): Promise<void>;
+  loadMessages(sessionId: string, opts?: LoadMessagesOptions): Promise<Message[]>;
 
   // Todos
-  saveTodos(agentId: string, snapshot: TodoSnapshot): Promise<void>;
-  loadTodos(agentId: string): Promise<TodoSnapshot | undefined>;
+  saveTodos(sessionId: string, snapshot: TodoSnapshot): Promise<void>;
+  loadTodos(sessionId: string): Promise<TodoSnapshot | undefined>;
 
   // Metadata
-  saveInfo(agentId: string, info: AgentInfo): Promise<void>;
-  loadInfo(agentId: string): Promise<AgentInfo | undefined>;
+  saveInfo(sessionId: string, info: AgentInfo): Promise<void>;
+  loadInfo(sessionId: string): Promise<AgentInfo | undefined>;
 
   // Lifecycle
-  exists(agentId: string): Promise<boolean>;
-  delete(agentId: string): Promise<void>;
+  exists(sessionId: string): Promise<boolean>;
+  delete(sessionId: string): Promise<void>;
   list(prefix?: string): Promise<string[]>;
 }
 ```
