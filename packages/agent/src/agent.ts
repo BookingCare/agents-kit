@@ -582,6 +582,9 @@ export class Agent {
         if (event.type !== "agent_end") {
           throw e;
         }
+        console.warn(
+          `[agent] listener error during agent_end: ${e instanceof Error ? e.message : String(e)}`,
+        );
       }
     }
   }
