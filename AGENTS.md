@@ -22,7 +22,7 @@
 - After code changes (not documentation changes): `pnpm check` (get full output, no tail). fix all errors, warnings, and infos before committings.
 - Note: `pnpm check` does not run tests.
 - NEVER run: `pnpm dev`, `pnpm build`, `pnpm test`
-- Only run specific tests if user instructs: `npx tsx ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts`
+- Only run specific tests if user instructs: `npx vitest run test/specific.test.ts` (from package root)
 - Run tests from package root, not the repo root.
 - If you create or modify a test file, you MUST run that test file and iterate until it passes.
 - When writing tests, run them, indentify issues in either the test or implementation, and iterate until fixed.
@@ -175,6 +175,7 @@ Multiple agents may work on different files in the same worktree simultaneously.
 ### Committing
 
 - **ONLY commit files YOU changed in THIS session**
+- When creating a PR, commit to a feature branch — never commit directly to main if the target is a PR
 - ALWAYS include `fixes #<number>` or `closes #<number>` in the commit message when there is a related issue or PR
 - NEVER use `git add -A` or `git add .` - these sweep up changes from other agents
 - ALWAYS use `git add <specific-file-paths>` listing only files you modified
