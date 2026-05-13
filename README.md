@@ -1,16 +1,46 @@
-# Agents Kit Harness Mono Repo
+# Agents Kit
 
-## All Packages
+A TypeScript toolkit for building AI-powered agents with streaming, tool dispatch, skill loading, and todo tracking.
 
-| Package                            | Description                                              |
-| ---------------------------------- | -------------------------------------------------------- |
-| **[@BookingCare/ai](packages/ai)** | Unified multi-provider LLM API (openAI, Anthropic, etc.) |
+## Packages
+
+| Package                              | Version                                                                                                         | Description                                                                    |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [@bookingcare/ai](packages/ai)       | [![npm](https://img.shields.io/npm/v/@bookingcare/ai.svg)](https://www.npmjs.com/package/@bookingcare/ai)       | Unified multi-provider LLM API with streaming, tool calling, and cost tracking |
+| [@bookingcare/agent](packages/agent) | [![npm](https://img.shields.io/npm/v/@bookingcare/agent.svg)](https://www.npmjs.com/package/@bookingcare/agent) | Agent loop with tool dispatch, file tools, skill loading, and todo tracking    |
+
+## Quick Start
+
+### LLM Streaming
+
+```typescript
+import { getModel, stream, complete } from "@bookingcare/ai";
+
+const model = getModel("gpt-5.4-nano")!;
+const result = await complete(model, {
+  messages: [{ role: "user", content: "Hello!" }],
+});
+console.log(result.text);
+```
+
+### Agent Loop
+
+```typescript
+import { agentLoop } from "@bookingcare/agent";
+import { getModel } from "@bookingcare/ai";
+
+const model = getModel("gpt-5.4-nano")!;
+const { messages, iterations } = await agentLoop("Create a file called notes.txt", {
+  model,
+  workdir: "/path/to/workspace",
+});
+```
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributtion guidelines and [AGENTS.md](AGENTS.md) for project-specifice rules (for both humans and agents).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules.
 
-## Developement
+## Development
 
 ```bash
 pnpm install        # Install all dependencies
