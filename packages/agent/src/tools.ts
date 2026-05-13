@@ -73,28 +73,22 @@ export const loadSkillTool = tool({
 // --- Tool handlers ---
 
 function runBash(command: string, workdir: string): string {
-  try {
-    const stdout = execSync(command, {
-      encoding: "utf-8",
-      timeout: 30_000,
-      maxBuffer: 1024 * 1024,
-      cwd: workdir,
-    });
-    return stdout || "(no output)";
-  } catch (err: unknown) {
-    const e = err as { stdout?: string; stderr?: string; message?: string };
-    const parts: string[] = [];
-    if (e.stdout) parts.push(e.stdout);
-    if (e.stderr) parts.push(e.stderr);
-    if (!parts.length && e.message) parts.push(e.message);
-    return parts.join("\n") || "(error)";
-  }
+  const stdout = execSync(command, {
+    encoding: "utf-8",
+    timeout: 30_000,
+    maxBuffer: 1024 * 1024,
+    cwd: workdir,
+  });
+  return stdout || "(no output)";
 }
 
 function runRead(path: string, workdir: string, limit?: number): string {
   const safe = safePath(path, workdir);
   const text = readFileSync(safe, "utf-8");
   if (limit != null) {
+    if (limit < 1) {
+      throw new Error(`Invalid limit: ${limit}. Must be >= 1.`);
+    }
     const lines = text.split("\n");
     return lines.slice(0, limit).join("\n");
   }
@@ -113,11 +107,11 @@ function runEdit(path: string, oldText: string, newText: string, workdir: string
   const content = readFileSync(safe, "utf-8");
   const index = content.indexOf(oldText);
   if (index === -1) {
-    return `Error: old_text not found in ${path}`;
+    throw new Error(`old_text not found in ${path}`);
   }
   const secondIndex = content.indexOf(oldText, index + 1);
   if (secondIndex !== -1) {
-    return `Error: old_text is not unique in ${path} (found at multiple positions)`;
+    throw new Error(`old_text is not unique in ${path} (found at multiple positions)`);
   }
   const updated = content.slice(0, index) + newText + content.slice(index + oldText.length);
   writeFileSync(safe, updated, "utf-8");

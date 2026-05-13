@@ -274,6 +274,56 @@ describe.skipIf(!auth)("skill loading e2e", () => {
   });
 });
 
+// --- Tool dispatch unit tests ---
+
+describe("tool dispatch", () => {
+  let workdir: string;
+
+  beforeEach(() => {
+    workdir = resolve(tmpdir(), `agent-tool-test-${Date.now()}`);
+    mkdirSync(workdir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(workdir, { recursive: true, force: true });
+  });
+
+  it("bash throws on non-zero exit", () => {
+    const { dispatch } = createToolDispatch(workdir);
+    expect(() => dispatch["bash"]({ command: "exit 1" })).toThrow();
+  });
+
+  it("edit_file throws when old_text not found", () => {
+    writeFileSync(resolve(workdir, "test.txt"), "hello world");
+    const { dispatch } = createToolDispatch(workdir);
+    expect(() =>
+      dispatch["edit_file"]({
+        path: "test.txt",
+        old_text: "nonexistent",
+        new_text: "replaced",
+      }),
+    ).toThrow("old_text not found");
+  });
+
+  it("edit_file throws when old_text is not unique", () => {
+    writeFileSync(resolve(workdir, "test.txt"), "abc def abc");
+    const { dispatch } = createToolDispatch(workdir);
+    expect(() =>
+      dispatch["edit_file"]({
+        path: "test.txt",
+        old_text: "abc",
+        new_text: "xyz",
+      }),
+    ).toThrow("not unique");
+  });
+
+  it("read_file throws on negative limit", () => {
+    writeFileSync(resolve(workdir, "test.txt"), "line1\nline2\nline3\n");
+    const { dispatch } = createToolDispatch(workdir);
+    expect(() => dispatch["read_file"]({ path: "test.txt", limit: -1 })).toThrow("Invalid limit");
+  });
+});
+
 // --- Todo tracking ---
 
 describe.skipIf(!auth)("todo tracking e2e", () => {

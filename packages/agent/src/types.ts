@@ -26,6 +26,7 @@ export interface AgentLoopOptions {
   maxTokens?: number;
   maxIterations?: number;
   onStreamResult?: (result: StreamResult, iteration: number) => void;
+  signal?: AbortSignal;
 }
 
 // --- Tools ---

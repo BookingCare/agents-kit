@@ -43,6 +43,7 @@ export async function agentLoop(query: string, options: AgentLoopOptions) {
     maxTokens = 8000,
     maxIterations = 50,
     onStreamResult,
+    signal: userSignal,
   } = options;
 
   // Use provided dispatch or create default from workdir
@@ -186,7 +187,7 @@ export async function agentLoop(query: string, options: AgentLoopOptions) {
     context,
     config,
     emit,
-    new AbortController().signal,
+    userSignal ?? new AbortController().signal,
     streamSimple,
     maxIterations,
   );
@@ -468,7 +469,19 @@ async function executeToolCalls(
   const toolMap = new Map(tools.map((t) => [t.name, t] as [string, AgentTool]));
 
   const execute = async (toolCall: ToolCall): Promise<AgentMessage> => {
-    const args = JSON.parse(toolCall.arguments) as Record<string, unknown>;
+    let args: Record<string, unknown>;
+    try {
+      args = JSON.parse(toolCall.arguments) as Record<string, unknown>;
+    } catch (e) {
+      return {
+        role: "toolResult",
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        content: [{ type: "text" as const, text: `Error: ${(e as Error).message}` }],
+        isError: true,
+        timestamp: Date.now(),
+      };
+    }
     // Resolve tool, prepare arguments, execute
     const toolDef = toolMap.get(toolCall.name);
 

@@ -487,15 +487,16 @@ export class Agent {
   }
 
   private async handleRunFailure(error: unknown, aborted: boolean): Promise<void> {
+    const errorText = error instanceof Error ? error.message : String(error);
     const failureMessage: AgentMessage = {
       role: "assistant",
-      content: [{ type: "text" as const, text: "" }],
+      content: [{ type: "text" as const, text: errorText }],
       api: this._state.model.api,
       provider: this._state.model.provider as string,
       model: this._state.model.id,
       usage: EMPTY_USAGE,
       stopReason: aborted ? "aborted" : "error",
-      errorMessage: error instanceof Error ? error.message : String(error),
+      errorMessage: errorText,
       timestamp: Date.now(),
     };
     const streamingPartial: StreamingAssistantMessage = {
@@ -574,7 +575,14 @@ export class Agent {
       throw new Error("Agent listener invoked outside active run");
     }
     for (const listener of this.listeners) {
-      await listener(event, signal);
+      try {
+        await listener(event, signal);
+      } catch (e) {
+        // Swallow listener errors during agent_end to prevent masking the original error
+        if (event.type !== "agent_end") {
+          throw e;
+        }
+      }
     }
   }
 }

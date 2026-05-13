@@ -114,5 +114,23 @@ describe("SkillLoader", () => {
         rmSync(dir, { recursive: true, force: true });
       }
     });
+
+    it("handles frontmatter values containing colons", () => {
+      const dir = resolve(tmpdir(), `skill-test-colon-${Date.now()}`);
+      const skillDir = resolve(dir, "colon");
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(
+        resolve(skillDir, "SKILL.md"),
+        "---\nname: colon\ndescription: Review: structured code reviews with a checklist\n---\nColon skill body",
+      );
+      try {
+        const loader = new SkillLoader(dir);
+        expect(loader.has("colon")).toBe(true);
+        const desc = loader.getDescriptions();
+        expect(desc).toContain("Review: structured code reviews with a checklist");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 });
