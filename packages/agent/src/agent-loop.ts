@@ -503,7 +503,7 @@ async function executeToolCalls(
           };
         }
         if (before.action === "replace") {
-          Object.assign(args, before.args);
+          args = before.args;
         }
       }
     }
@@ -553,7 +553,13 @@ async function executeToolCalls(
     };
   };
 
-  if (config.toolExecution === "sequential") {
+  // Per-tool executionMode overrides: if any tool call requires sequential, run all sequentially.
+  const hasSequential = toolCalls.some((tc) => {
+    const toolDef = toolMap.get(tc.name);
+    return toolDef?.executionMode === "sequential";
+  });
+
+  if (config.toolExecution === "sequential" || hasSequential) {
     for (const tc of toolCalls) {
       if (signal.aborted) break;
       results.push(await execute(tc));

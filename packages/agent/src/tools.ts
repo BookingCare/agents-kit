@@ -24,7 +24,7 @@ function safePath(path: string, workdir: string): string {
 
 export const bashTool = tool({
   name: "bash",
-  description: "Run a bash command and return its stdout and stderr.",
+  description: "Run a bash command and return its stdout.",
   parameters: Type.Object({
     command: Type.String({ description: "The bash command to run" }),
   }),
