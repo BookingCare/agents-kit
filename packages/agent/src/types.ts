@@ -10,6 +10,7 @@ import type {
   TSchema,
   Tool,
   ToolCall,
+  Transport,
 } from "@bookingcare/ai";
 import type { SkillLoader } from "./skill-loader.js";
 import type { TodoManager } from "./todo-manager.js";
@@ -84,7 +85,7 @@ export interface AgentLoopConfig {
   sessionId?: string;
   onPayload?: SimpleStreamOptions["onPayload"];
   onResponse?: SimpleStreamOptions["onResponse"];
-  transport?: import("@bookingcare/ai").Transport;
+  transport?: Transport;
   thinkingBudgets?: unknown;
   maxRetryDelayMs?: number;
   toolExecution: ToolExecutionMode;

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Optional `store` parameter on `Agent` — accepts a `@bookingcare/db` `Store` for automatic session persistence
+- Optional `todoManager` parameter on `Agent` — todo state is persisted to the store alongside messages
+- `Agent.resume()` static method — reconstructs an agent from a previously persisted session (loads messages, metadata, and todo state)
+- `sessionId` is auto-generated when `store` is provided and no `sessionId` is given
+- State is persisted automatically on each `agent_end` event when a `store` is configured
+
 ## [0.2.0] - 2026-05-13
 
 ### Added

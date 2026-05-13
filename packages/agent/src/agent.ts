@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   type Api,
   type ImageContent,
@@ -5,11 +6,15 @@ import {
   type Model,
   type SimpleStreamOptions,
   streamSimple,
+  getModel,
   type TextContent,
   type Tool,
   type Transport,
 } from "@bookingcare/ai";
+import type { Store, AgentInfo } from "@bookingcare/db";
+import { NotFoundError, serializeAgentState, createTodoSnapshot } from "@bookingcare/db";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.js";
+import type { TodoManager } from "./todo-manager.js";
 import type {
   AfterToolCallContext,
   AfterToolCallResult,
@@ -122,6 +127,10 @@ export interface AgentOptions {
   transport?: Transport;
   maxRetryDelayMs?: number;
   toolExecution?: ToolExecutionMode;
+  /** Optional persistence store for session save/resume. */
+  store?: Store;
+  /** Optional todo manager for persisting todo state. */
+  todoManager?: TodoManager;
 }
 
 class PendingMessageQueue {
@@ -206,6 +215,9 @@ export class Agent {
   public maxRetryDelayMs?: number;
   /** Tool execution strategy for assistant messages that contain multiple tool calls. */
   public toolExecution: ToolExecutionMode;
+  private store?: Store;
+  private todoManager?: TodoManager;
+  private createdAt?: number;
 
   constructor(options: AgentOptions = {}) {
     this._state = createMutableAgentState(options.initialState);
@@ -220,10 +232,97 @@ export class Agent {
     this.prepareNextTurn = options.prepareNextTurn;
     this.steeringQueue = new PendingMessageQueue(options.steeringMode ?? "one-at-a-time");
     this.followUpQueue = new PendingMessageQueue(options.followUpMode ?? "one-at-a-time");
-    this.sessionId = options.sessionId;
+    this.store = options.store;
+    this.todoManager = options.todoManager;
+    this.sessionId = options.sessionId ?? (options.store ? randomUUID() : undefined);
+    this.createdAt = options.store ? Date.now() : undefined;
     this.transport = options.transport ?? "auto";
     this.maxRetryDelayMs = options.maxRetryDelayMs;
     this.toolExecution = options.toolExecution ?? "parallel";
+  }
+
+  /**
+   * Resume a previously persisted session.
+   *
+   * Loads messages, metadata, and todo state from the given store,
+   * reconstructs the model from the saved model ID, and returns a new
+   * Agent ready to continue.
+   *
+   * Tools are not persisted and must be re-registered after resume.
+   */
+  public static async resume(
+    options: {
+      sessionId: string;
+      store: Store;
+      model?: Model<Api>;
+      todoManager?: TodoManager;
+    } & Omit<AgentOptions, "store" | "sessionId" | "todoManager" | "initialState">,
+  ): Promise<Agent> {
+    const { sessionId, store, model: providedModel, todoManager, ...agentOptions } = options;
+
+    const [messages, info, todoSnapshot] = await Promise.all([
+      store.loadMessages(sessionId),
+      store.loadInfo(sessionId),
+      store.loadTodos(sessionId),
+    ]);
+
+    if (!info) {
+      throw new NotFoundError(sessionId);
+    }
+
+    const model = providedModel ?? getModel(info.model);
+    if (!model) {
+      throw new Error(`Model not found: ${info.model}`);
+    }
+
+    const agent = new Agent({
+      initialState: {
+        messages,
+        systemPrompt: info.systemPrompt,
+        model,
+        thinkingLevel: "off",
+        tools: [],
+      },
+      sessionId,
+      store,
+      todoManager,
+      ...agentOptions,
+    });
+
+    agent.createdAt = info.createdAt;
+
+    if (todoSnapshot && todoManager) {
+      todoManager.update(todoSnapshot.items);
+    }
+
+    return agent;
+  }
+
+  /** Persist current session state to the store. */
+  private async persistSession(messages: AgentMessage[]): Promise<void> {
+    if (!this.store || !this.sessionId) return;
+
+    const serialized = serializeAgentState(this._state);
+    const todoSnapshot = this.todoManager
+      ? createTodoSnapshot(this.todoManager.getItems(), this.todoManager.render())
+      : { items: [], rendered: "No todos." };
+
+    const now = Date.now();
+    const info: AgentInfo = {
+      sessionId: this.sessionId,
+      model: serialized.info.model,
+      provider: serialized.info.provider,
+      systemPrompt: serialized.info.systemPrompt,
+      createdAt: this.createdAt ?? now,
+      updatedAt: now,
+      messageCount: messages.length,
+    };
+
+    await Promise.all([
+      this.store.saveMessages(this.sessionId, messages),
+      this.store.saveTodos(this.sessionId, todoSnapshot),
+      this.store.saveInfo(this.sessionId, info),
+    ]);
   }
 
   /**
@@ -567,6 +666,14 @@ export class Agent {
         // Sync full transcript from the loop's internal message list
         this._state.messages = event.messages.slice();
         this._state.streamingMessage = undefined;
+
+        try {
+          await this.persistSession(event.messages);
+        } catch (err) {
+          console.warn(
+            `[agent] persistence failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
         break;
     }
 
