@@ -1,9 +1,19 @@
-# @agents-kit/ai
+# @bookingcare/ai
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-13
+
 ### Breaking Changes
 
+- `stream()` and `streamSimple()` now return `AssistantMessageEventStream` (push-based `EventStream`) instead of `AsyncGenerator<StreamEvent>`.
+- `Tool<TSchema>` replaces `ToolDefinition`. `ToolDefinition` is now a deprecated alias.
+- `AssistantMessageEvent` replaces flat `StreamEvent` union. Events are now structured with typed start/delta/end lifecycle (`text_start`, `text_delta`, `text_end`, `toolcall_start`, `toolcall_delta`, `toolcall_end`, etc.).
+- Removed `TextEvent`, `ToolCallDeltaEvent`, `ToolCallParsedEvent`, `ThinkingEvent`, `UsageEvent`, `StopEvent`, `StreamEvent` types.
+- Removed `withParsedToolCalls()` (was built on legacy `tool_call_parsed` events).
+- Removed `TypedToolDefinition`; `tool()` now returns `Tool<TParams>` directly.
+- `StopReason` now includes `stop`, `length`, `toolUse`, `aborted` (in addition to legacy values).
+- `OpenAICompletionsCompat.variant` and `OpenAIResponsesCompat.variant` reduced to `"openai" | "azure" | "custom"`.
 - Removed `ProviderApi` interface. Providers now implement `ApiProvider<TApi, TOptions>` and register via `registerApiProvider()`.
 - Replaced `registerProvider(api, provider)` with `registerApiProvider(provider, sourceId?)`.
 - Replaced `resolveApiProvider(api)` with `getApiProvider(api)`.
@@ -13,6 +23,11 @@
 
 ### Added
 
+- `EventStream<T, R>` class: generic push-based async iterable with typed final result via `result()`.
+- `AssistantMessageEventStream` class: extends `EventStream` with structured event protocol for assistant messages.
+- `createAssistantMessageEventStream()` factory function.
+- `AssistantMessageEvent` type: structured event protocol where every event carries a `partial` `AssistantMessage` for live state inspection.
+- Content type guards: `isTextContent()`, `isImageContent()`, `isToolCall()`.
 - `StreamFunction<TApi, TOptions>` type: typed contract for provider stream functions with error-in-stream guarantees.
 - `ApiProvider<TApi, TOptions>` interface: providers declare their `api`, `stream`, and `streamSimple` with full type specificity.
 - `ApiStreamFunction` and `ApiStreamSimpleFunction` types for the registry's internal storage.
@@ -26,27 +41,6 @@
 
 - Azure OpenAI provider refactored from monolithic function to `StreamFunction` pattern with extracted `buildParams()` and `createClient()` helpers.
 - Azure OpenAI provider exports a plain `{ api, stream, streamSimple }` object instead of a `ProviderApi`-typed object.
-
-## [0.2.0] - 2026-05-11
-
-### Breaking Changes
-
-- `stream()` and `streamSimple()` now return `AssistantMessageEventStream` (push-based `EventStream`) instead of `AsyncGenerator<StreamEvent>`.
-- `Tool<TSchema>` replaces `ToolDefinition`. `ToolDefinition` is now a deprecated alias.
-- `AssistantMessageEvent` replaces flat `StreamEvent` union. Events are now structured with typed start/delta/end lifecycle (`text_start`, `text_delta`, `text_end`, `toolcall_start`, `toolcall_delta`, `toolcall_end`, etc.).
-- Removed `TextEvent`, `ToolCallDeltaEvent`, `ToolCallParsedEvent`, `ThinkingEvent`, `UsageEvent`, `StopEvent`, `StreamEvent` types.
-- Removed `withParsedToolCalls()` (was built on legacy `tool_call_parsed` events).
-- Removed `TypedToolDefinition`; `tool()` now returns `Tool<TParams>` directly.
-- `StopReason` now includes `stop`, `length`, `toolUse`, `aborted` (in addition to legacy values).
-- `OpenAICompletionsCompat.variant` and `OpenAIResponsesCompat.variant` reduced to `"openai" | "azure" | "custom"`.
-
-### Added
-
-- `EventStream<T, R>` class: generic push-based async iterable with typed final result via `result()`.
-- `AssistantMessageEventStream` class: extends `EventStream` with structured event protocol for assistant messages.
-- `createAssistantMessageEventStream()` factory function.
-- `AssistantMessageEvent` type: structured event protocol where every event carries a `partial` `AssistantMessage` for live state inspection.
-- Content type guards: `isTextContent()`, `isImageContent()`, `isToolCall()`.
 
 ## [0.1.2] - 2026-05-11
 

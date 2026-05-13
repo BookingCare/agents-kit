@@ -1,4 +1,4 @@
-# @agents-kit/ai
+# @bookingcare/ai
 
 Unified LLM API with automatic model discovery, provider configuration, token and cost tracking, and simple context persistence and hand-off to other models mid-session.
 
@@ -7,14 +7,14 @@ Unified LLM API with automatic model discovery, provider configuration, token an
 ## Installation
 
 ```bash
-pnpm add @agents-kit/ai
+pnpm add @bookingcare/ai
 ```
 
 ## Quick Start
 
 ```typescript
-import { getModel, complete, stream, collectStream } from "@agents-kit/ai";
-import type { Context } from "@agents-kit/ai";
+import { getModel, complete, stream, collectStream } from "@bookingcare/ai";
+import type { Context } from "@bookingcare/ai";
 
 const model = getModel("gpt-5.4-nano")!;
 
@@ -119,7 +119,7 @@ const message = await eventStream.result();
 ## Tool Calling
 
 ```typescript
-import { getModel, complete, type Context } from "@agents-kit/ai";
+import { getModel, complete, type Context } from "@bookingcare/ai";
 
 const model = getModel("gpt-5.4-nano")!;
 
@@ -154,7 +154,7 @@ if (result.stopReason === "toolUse") {
 Use the `tool()` helper with TypeBox schemas for end-to-end type safety:
 
 ```typescript
-import { Type, Static, tool } from "@agents-kit/ai";
+import { Type, Static, tool } from "@bookingcare/ai";
 
 const GetWeatherParams = Type.Object({
   city: Type.String({ description: "City name" }),
@@ -174,7 +174,7 @@ type WeatherArgs = Static<typeof getWeather.parameters>;
 ## Conversation & Model Hand-off
 
 ```typescript
-import { getModel, Conversation, stream } from "@agents-kit/ai";
+import { getModel, Conversation, stream } from "@bookingcare/ai";
 
 const model = getModel("gpt-5.4-nano")!;
 
@@ -206,7 +206,7 @@ const restored = Conversation.fromJSON(json);
 ## Model Discovery
 
 ```typescript
-import { listModels, getModel, getModelsByProvider } from "@agents-kit/ai";
+import { listModels, getModel, getModelsByProvider } from "@bookingcare/ai";
 
 // All models
 const models = listModels();
@@ -251,7 +251,7 @@ The model name in `getModel()` maps to your Azure deployment name. Create deploy
 Utility functions for narrowing content types:
 
 ```typescript
-import { isTextContent, isImageContent, isToolCall } from "@agents-kit/ai";
+import { isTextContent, isImageContent, isToolCall } from "@bookingcare/ai";
 
 // Check content parts
 if (isTextContent(part)) {
