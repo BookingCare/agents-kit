@@ -26,13 +26,13 @@ importers:
       '@bookingcare/ai':
         specifier: workspace:*
         version: link:../ai
+      '@bookingcare/db':
+        specifier: workspace:*
+        version: link:../db
       '@sinclair/typebox':
         specifier: ^0.34.49
         version: 0.34.49
     devDependencies:
-      '@bookingcare/db':
-        specifier: workspace:*
-        version: link:../db
       '@bookingcare/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
