@@ -1,7 +1,7 @@
 {
-  "name": "@bookingcare/ai",
+  "name": "@bookingcare/db",
   "version": "0.2.0",
-  "description": "Unified LLM API with automatic model discovery, provider configuration, token and cost tracking, and context persistence",
+  "description": "Persistence layer for agent sessions with pluggable storage backends",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,9 +11,9 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./azure-openai": {
-      "types": "./dist/providers/azure-openai.d.ts",
-      "default": "./dist/providers/azure-openai.js"
+    "./json-store": {
+      "types": "./dist/providers/json-store.d.ts",
+      "default": "./dist/providers/json-store.js"
     }
   },
   "files": [
@@ -23,8 +23,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "type-check": "tsc --noEmit",
-    "generate-models": "tsx scripts/generate-models.ts"
+    "type-check": "tsc --noEmit"
   },
   "devDependencies": {
     "@bookingcare/tsconfig": "workspace:*",
@@ -33,8 +32,6 @@
     "vitest": "^4.1.5"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.49",
-    "openai": "^6.37.0",
-    "partial-json": "^0.1.7"
+    "@bookingcare/ai": "workspace:*"
   }
 }

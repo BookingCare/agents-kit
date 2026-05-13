@@ -16,8 +16,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "clean": "rm -rf dist *.tsbuildinfo",
     "type-check": "tsc --noEmit"
   },
@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@bookingcare/ai": "workspace:*",
+    "@bookingcare/db": "workspace:*",
     "@sinclair/typebox": "^0.34.49"
   }
 }

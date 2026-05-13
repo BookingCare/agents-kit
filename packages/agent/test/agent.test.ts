@@ -1,101 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Agent } from "../src/agent.js";
 import type { AgentEvent, AgentMessage, AgentTool, QueueMode } from "../src/types.js";
-import type {
-  AssistantMessage,
-  AssistantMessageEventStream,
-  Model,
-  SimpleStreamOptions,
-  StopReason,
-  Tool,
-} from "@bookingcare/ai";
+import type { Model, SimpleStreamOptions } from "@bookingcare/ai";
 import { createAssistantMessageEventStream, Type } from "@bookingcare/ai";
-
-// ── Mock stream function ──────────────────────────────────────────────
-
-/**
- * Create a mock streamFn that emits a text response, optionally followed by tool calls.
- * Returns the event stream — the caller's loop collects it.
- */
-function createMockStream(responses: MockResponse[]) {
-  const remaining = [...responses];
-  return vi.fn((_model: Model<any>, _ctx: any, _opts?: SimpleStreamOptions) => {
-    const stream = createAssistantMessageEventStream();
-    const response = remaining.shift();
-    if (!response) throw new Error("No more mock responses");
-
-    // Push events asynchronously so the loop can collect them
-    setTimeout(() => {
-      const assistant = buildAssistantMessage(response);
-
-      // Emit start
-      stream.push({ type: "start", partial: assistant });
-
-      // Emit text deltas
-      if (response.text) {
-        stream.push({ type: "text_start", contentIndex: 0, partial: assistant });
-        stream.push({
-          type: "text_delta",
-          contentIndex: 0,
-          delta: response.text,
-          partial: assistant,
-        });
-        stream.push({
-          type: "text_end",
-          contentIndex: 0,
-          content: response.text,
-          partial: assistant,
-        });
-      }
-
-      // Emit tool call events
-      for (let i = 0; i < (response.toolCalls?.length ?? 0); i++) {
-        const tc = response.toolCalls![i];
-        stream.push({ type: "toolcall_start", contentIndex: i, partial: assistant });
-        stream.push({
-          type: "toolcall_delta",
-          contentIndex: i,
-          delta: tc.arguments,
-          partial: assistant,
-        });
-        stream.push({ type: "toolcall_end", contentIndex: i, toolCall: tc, partial: assistant });
-      }
-
-      // Emit done
-      stream.push({ type: "done", reason: response.stopReason ?? "stop", message: assistant });
-    }, 0);
-
-    return stream;
-  });
-}
-
-interface MockResponse {
-  text?: string;
-  toolCalls?: { id: string; name: string; arguments: string }[];
-  stopReason?: StopReason;
-}
-
-function buildAssistantMessage(response: MockResponse): AssistantMessage {
-  const content: AssistantMessage["content"] = [];
-  if (response.text) {
-    content.push({ type: "text", text: response.text });
-  }
-  if (response.toolCalls) {
-    for (const tc of response.toolCalls) {
-      content.push({ id: tc.id, name: tc.name, arguments: tc.arguments });
-    }
-  }
-  return {
-    role: "assistant",
-    content,
-    api: "openai-completions",
-    provider: "openai",
-    model: "test-model",
-    usage: { inputTokens: 10, outputTokens: 20 },
-    stopReason: response.stopReason ?? "stop",
-    timestamp: Date.now(),
-  };
-}
+import { createMockStream, buildAssistantMessage } from "./helpers/helpers.js";
 
 // ── Test tool ─────────────────────────────────────────────────────────
 
@@ -104,7 +12,7 @@ const echoTool: AgentTool = {
   description: "Echoes back the input",
   parameters: Type.Object({ message: Type.String() }),
   label: "Echo",
-  execute: async (_id, params) => ({ content: params.message }),
+  execute: async (_id, params) => ({ content: (params as { message: string }).message }),
 };
 
 const failTool: AgentTool = {
@@ -269,8 +177,8 @@ describe("Agent", () => {
       const signal = opts?.signal;
       if (signal) {
         signal.addEventListener("abort", () => {
-          const assistant = buildAssistantMessage({ text: "" });
-          stream.push({ type: "done", reason: "aborted", message: assistant });
+          const assistant = buildAssistantMessage({ text: "", stopReason: "stop" });
+          stream.push({ type: "done", reason: "stop", message: assistant });
         });
       }
       return stream;

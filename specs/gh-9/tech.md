@@ -312,38 +312,34 @@ export class JSONStore implements Store {
 
 ### Serialization utilities (packages/db/src/utils/serialize.ts)
 
-```typescript
-import type { AgentState } from "@bookingcare/agent";
-import type { AgentInfo, TodoSnapshot } from "../types.js";
+To avoid a circular dependency between `packages/db` and `packages/agent`, the serializer accepts a locally defined `AgentStateLike` interface instead of importing `AgentState` directly.
 
-export function serializeAgentState(state: AgentState): {
-  messages: AgentMessage[];
-  info: Omit<AgentInfo, "sessionId" | "createdAt" | "updatedAt" | "messageCount">;
+```typescript
+import type { Message } from "@bookingcare/ai";
+import type { TodoItem, TodoSnapshot, AgentInfo } from "../types.js";
+
+interface AgentStateLike {
+  messages: Message[];
+  model: { id: string; provider: string | unknown };
+  systemPrompt: string;
+}
+
+export function serializeAgentState(state: AgentStateLike): {
+  messages: Message[];
+  info: Pick<AgentInfo, "model" | "provider" | "systemPrompt">;
 } {
   return {
     messages: state.messages,
     info: {
       model: state.model.id,
-      provider: state.model.provider as string,
+      provider: String(state.model.provider),
       systemPrompt: state.systemPrompt,
     },
   };
 }
 
-export function deserializeAgentState(
-  messages: AgentMessage[],
-  info: AgentInfo,
-): Partial<AgentState> {
-  return {
-    messages,
-    systemPrompt: info.systemPrompt,
-    // Model needs to be reconstructed from the model registry
-    // This is handled in Agent.resume()
-  };
-}
-
 export function createTodoSnapshot(items: TodoItem[], rendered: string): TodoSnapshot {
-  return { items, rendered };
+  return { items: items.slice(), rendered };
 }
 ```
 
@@ -378,14 +374,13 @@ class Agent {
 ```typescript
 constructor(options: AgentOptions = {}) {
   // ... existing initialization
-  if (options.store && !options.sessionId) {
-    throw new Error("sessionId is required when store is provided");
-  }
   this.store = options.store;
   this.todoManager = options.todoManager;
-  this.sessionId = options.sessionId ?? crypto.randomUUID();
+  this.sessionId = options.sessionId ?? (options.store ? randomUUID() : undefined);
 }
 ```
+
+When a store is provided but no `sessionId` is given, a UUID is auto-generated. Without a store, `sessionId` remains optional (preserving existing behavior).
 
 4. Add persistence to `processEvents()` on `agent_end`:
 
@@ -408,11 +403,10 @@ private async processEvents(event: AgentEvent): Promise<void> {
 }
 
 private async persistSession(messages: AgentMessage[]): Promise<void> {
-  if (!this.store) return;
+  if (!this.store || !this.sessionId) return;
 
-  const { serializeAgentState, createTodoSnapshot } = await import("@bookingcare/db");
+  // Uses serializeAgentState and createTodoSnapshot from @bookingcare/db
 
-  // Serialize state
   const serialized = serializeAgentState(this._state);
   const todoSnapshot = this.todoManager
     ? createTodoSnapshot(
@@ -422,7 +416,7 @@ private async persistSession(messages: AgentMessage[]): Promise<void> {
     : { items: [], rendered: "No todos." };
 
   const now = Date.now();
-  const info: import("@bookingcare/db").AgentInfo = {
+  const info: AgentInfo = {
     sessionId: this.sessionId,
     model: serialized.info.model,
     systemPrompt: serialized.info.systemPrompt,
@@ -459,11 +453,10 @@ export class Agent {
     const todoSnapshot = await store.loadTodos(sessionId);
 
     if (!info) {
-      throw new import("@bookingcare/db").NotFoundError(sessionId);
+      throw new NotFoundError(sessionId);
     }
 
     // Reconstruct model from saved model ID
-    const { getModel } = await import("@bookingcare/ai");
     const model = providedModel ?? getModel(info.model);
     if (!model) {
       throw new Error(`Model not found: ${info.model}`);
@@ -475,8 +468,8 @@ export class Agent {
         messages,
         systemPrompt: info.systemPrompt,
         model,
-        thinkingLevel: "off",  // Default or restore from metadata
-        tools: [],  // Tools need to be re-registered
+        thinkingLevel: "off", // Default or restore from metadata
+        tools: [], // Tools need to be re-registered
       },
       sessionId,
       store,
@@ -527,7 +520,8 @@ No changes needed for core types. Store-related types live in `packages/db`.
     "build": "tsc",
     "dev": "tsc --watch",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@bookingcare/tsconfig": "workspace:*",
@@ -536,22 +530,20 @@ No changes needed for core types. Store-related types live in `packages/db`.
     "vitest": "^4.1.5"
   },
   "dependencies": {
-    "@bookingcare/agent": "workspace:*",
     "@bookingcare/ai": "workspace:*"
-  },
-  "peerDependencies": {
-    "@bookingcare/agent": "*",
-    "@bookingcare/ai": "*"
   }
 }
 ```
 
 ### packages/agent/package.json
 
-Add peer dependency on `@bookingcare/db`:
+Add `@bookingcare/db` as both a `devDependency` (for build-time type resolution) and a `peerDependency` (for runtime):
 
 ```json
 {
+  "devDependencies": {
+    "@bookingcare/db": "workspace:*"
+  },
   "peerDependencies": {
     "@bookingcare/db": "*"
   }
@@ -603,9 +595,9 @@ User creates agent without store
 
 ### Risk 1: Circular dependencies
 
-**Problem**: `packages/agent` depends on `packages/db`, `packages/db` depends on `packages/agent` (for types).
+**Problem**: `packages/agent` depends on `packages/db`, and `packages/db` previously depended on `packages/agent` for `AgentState` types.
 
-**Mitigation**: Use lazy imports and peer dependencies. The Store interface lives in `packages/db`, but `Agent` only imports it via `import()` at runtime. Type references use lazy type imports: `import("@bookingcare/db").Store`.
+**Mitigation**: `packages/db` defines a local `AgentStateLike` interface instead of importing `AgentState` from `@bookingcare/agent`, removing the circular dependency entirely. `packages/db` only depends on `@bookingcare/ai` for `Message` types. `packages/agent` references `packages/db` types via lazy inline imports and dynamic `import()` at runtime. `@bookingcare/db` is listed as both a `devDependency` (for build-time types) and a `peerDependency` (for runtime) of `@bookingcare/agent`.
 
 ### Risk 2: Model reconstruction on resume
 
@@ -640,7 +632,6 @@ User creates agent without store
 #### serialize.test.ts
 
 - `serializeAgentState()` extracts messages and metadata correctly
-- `deserializeAgentState()` reconstructs partial `AgentState`
 - Todo snapshot creation preserves items and rendered text
 - Edge cases: empty state, missing fields
 
@@ -660,31 +651,22 @@ User creates agent without store
 - Invalid JSON throws `CorruptDataError`
 - Filesystem errors throw `StoreError`
 
-#### integration.test.ts
-
-- Agent with store saves state on agent_end
-- Agent.resume() reconstructs full session
-- Messages are saved during session (not just at end)
-- Todo state changes are persisted
-- Session metadata is accurate
-- Missing session throws `NotFoundError`
-- Resume without store throws error
-
 ### Integration tests (packages/agent/test/)
 
 Add new test file `persistence.test.ts`:
 
-- `Agent` with `store` saves state automatically
+- `Agent` with `store` saves state automatically on `agent_end`
 - `Agent.resume()` restores state correctly
 - `Agent` without `store` has identical behavior to baseline
-- `sessionId` required when `store` is provided
+- `sessionId` auto-generated when `store` is provided without one
+- `sessionId` remains optional when no `store` is provided
 - Tools are not persisted (must be re-registered)
 - Message history is restored
 - Todo state is restored when `todoManager` is provided
 - Todo state is empty snapshot when `todoManager` is not provided
 - `createdAt` is preserved across resume
-- Message queries filter correctly by role, limit, and timestamp
-- Agent crash mid-run: last persisted state is retained on resume
+- Missing session throws `NotFoundError` on resume
+- Model info (model ID, provider) is persisted correctly
 
 ### Breaking change verification
 
