@@ -371,22 +371,23 @@ export interface SimpleStreamOptions extends StreamOptions {}
 // === Stream Result ===
 
 export interface Usage {
-  inputTokens: number;
-  outputTokens: number;
-  cacheCreationTokens?: number;
-  cacheReadTokens?: number;
-}
-
-export interface Cost {
   input: number;
   output: number;
-  total: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
 }
 
 export interface StreamResult {
   text: string;
   toolCalls: ToolCall[];
   usage: Usage;
-  cost?: Cost;
   stopReason: StopReason;
 }

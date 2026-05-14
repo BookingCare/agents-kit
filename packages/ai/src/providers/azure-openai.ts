@@ -189,7 +189,14 @@ export const streamAzureOpenAICompletions: StreamFunction<
       api: model.api,
       provider: model.provider,
       model: model.id,
-      usage: { inputTokens: 0, outputTokens: 0 },
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
       stopReason: "unknown",
       timestamp: Date.now(),
     };
@@ -202,7 +209,14 @@ export const streamAzureOpenAICompletions: StreamFunction<
         signal: options?.signal,
       })) as AsyncIterable<ChatCompletionChunk>;
 
-      const usage: Usage = { inputTokens: 0, outputTokens: 0 };
+      const usage: Usage = {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      };
       const toolCallParts = new Map<number, ToolCall>();
       let textBuf = "";
       let contentIndex = 0;
@@ -271,12 +285,13 @@ export const streamAzureOpenAICompletions: StreamFunction<
         }
 
         if (chunk.usage) {
-          usage.inputTokens += chunk.usage.prompt_tokens ?? 0;
-          usage.outputTokens += chunk.usage.completion_tokens ?? 0;
+          usage.input += chunk.usage.prompt_tokens ?? 0;
+          usage.output += chunk.usage.completion_tokens ?? 0;
           if (chunk.usage.prompt_tokens_details?.cached_tokens != null) {
-            usage.cacheReadTokens =
-              (usage.cacheReadTokens ?? 0) + chunk.usage.prompt_tokens_details.cached_tokens;
+            usage.cacheRead += chunk.usage.prompt_tokens_details.cached_tokens;
           }
+          // Azure OpenAI doesn't provide cache_write_tokens, assume 0 for now
+          usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
         }
 
         if (choice?.finish_reason) {

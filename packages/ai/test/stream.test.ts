@@ -66,11 +66,20 @@ describe("Cost Calculation", () => {
       contextWindow: 1000,
       maxTokens: 100,
     };
-    const usage: Usage = { inputTokens: 1_000_000, outputTokens: 500_000 };
+    const usage: Usage = {
+      input: 1_000_000,
+      output: 500_000,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 1_500_000,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    };
 
     const cost = calculateCost(usage, model);
     expect(cost.input).toBeCloseTo(3.0);
     expect(cost.output).toBeCloseTo(3.0);
+    expect(cost.cacheRead).toBeCloseTo(0.0);
+    expect(cost.cacheWrite).toBeCloseTo(0.0);
     expect(cost.total).toBeCloseTo(6.0);
   });
 });
@@ -108,7 +117,14 @@ describe("Conversation", () => {
 
   it("calculates total cost", () => {
     const model = getModel("gpt-5.4-nano")!;
-    const usage: Usage = { inputTokens: 1000, outputTokens: 500 };
+    const usage: Usage = {
+      input: 1000,
+      output: 500,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 1500,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    };
     const cost = calculateCost(usage, model);
     expect(cost.total).toBeGreaterThan(0);
   });
@@ -139,8 +155,8 @@ describe.skipIf(!auth)("stream", () => {
     const result = await collectStream(events, model());
 
     expect(result.text).toContain("4");
-    expect(result.usage.inputTokens).toBeGreaterThan(0);
-    expect(result.usage.outputTokens).toBeGreaterThan(0);
+    expect(result.usage.input).toBeGreaterThan(0);
+    expect(result.usage.output).toBeGreaterThan(0);
     expect(result.stopReason).toBe("stop");
   });
 
@@ -196,7 +212,7 @@ describe.skipIf(!auth)("stream", () => {
     );
 
     expect(result.text).toBeTruthy();
-    expect(result.usage.outputTokens).toBeLessThanOrEqual(10);
+    expect(result.usage.output).toBeLessThanOrEqual(10);
     expect(result.stopReason).toBe("length");
   });
 });
@@ -214,7 +230,7 @@ describe.skipIf(!auth)("streamSimple", () => {
     const result = await collectStream(eventStream, model());
 
     expect(result.text.toLowerCase().trim()).toBe("pong");
-    expect(result.usage.inputTokens).toBeGreaterThan(0);
+    expect(result.usage.input).toBeGreaterThan(0);
   });
 });
 
@@ -227,11 +243,10 @@ describe.skipIf(!auth)("generate", () => {
     });
 
     expect(result.text).toContain("4");
-    expect(result.usage.inputTokens).toBeGreaterThan(0);
-    expect(result.usage.outputTokens).toBeGreaterThan(0);
+    expect(result.usage.input).toBeGreaterThan(0);
+    expect(result.usage.output).toBeGreaterThan(0);
     expect(result.stopReason).toBe("stop");
-    expect(result.cost).toBeDefined();
-    expect(result.cost!.total).toBeGreaterThan(0);
+    expect(result.usage.cost.total).toBeGreaterThan(0);
   });
 
   it("returns cost from model pricing", async () => {
@@ -239,10 +254,9 @@ describe.skipIf(!auth)("generate", () => {
       messages: [userMsg("Say hello.")],
     });
 
-    expect(result.cost).toBeDefined();
-    expect(result.cost!.input).toBeGreaterThan(0);
-    expect(result.cost!.output).toBeGreaterThan(0);
-    expect(result.cost!.total).toBeCloseTo(result.cost!.input + result.cost!.output);
+    expect(result.usage.cost.input).toBeGreaterThan(0);
+    expect(result.usage.cost.output).toBeGreaterThan(0);
+    expect(result.usage.cost.total).toBeCloseTo(result.usage.cost.input + result.usage.cost.output);
   });
 });
 
@@ -258,7 +272,7 @@ describe.skipIf(!auth)("generateSimple", () => {
     });
 
     expect(result.text.toLowerCase().trim()).toBe("pong");
-    expect(result.usage.inputTokens).toBeGreaterThan(0);
-    expect(result.cost).toBeDefined();
+    expect(result.usage.input).toBeGreaterThan(0);
+    expect(result.usage.cost).toBeDefined();
   });
 });

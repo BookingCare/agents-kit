@@ -1,4 +1,5 @@
 import type { AgentMessage, ContextStrategy, TokenCounter } from "./types.js";
+import type { ToolCall } from "@bookingcare/ai";
 
 /**
  * Manages token budget and context trimming for agent messages.
@@ -53,6 +54,9 @@ export class ContextManager implements TokenCounter {
       for (const part of message.content) {
         if (typeof part === "object" && "text" in part) {
           chars += (part as { text: string }).text.length;
+        } else if (this.isToolCall(part)) {
+          // ToolCall: count id + name + arguments (actual content, not fixed overhead)
+          chars += part.id.length + part.name.length + part.arguments.length;
         } else {
           // image or other: estimate fixed overhead
           chars += 200;
@@ -61,6 +65,22 @@ export class ContextManager implements TokenCounter {
     }
     // Base overhead per message (role, formatting)
     return Math.ceil(chars / 4) + 3;
+  }
+
+  /**
+   * Type guard for ToolCall content parts.
+   */
+  private isToolCall(part: unknown): part is ToolCall {
+    return (
+      typeof part === "object" &&
+      part !== null &&
+      "id" in part &&
+      "name" in part &&
+      "arguments" in part &&
+      typeof (part as ToolCall).id === "string" &&
+      typeof (part as ToolCall).name === "string" &&
+      typeof (part as ToolCall).arguments === "string"
+    );
   }
 
   count(messages: AgentMessage[]): number {
@@ -117,6 +137,18 @@ export class ContextManager implements TokenCounter {
     const prepared = this.options.strategy.apply(messages, effectiveBudget, this);
     const trimmedTokens = this.count(prepared);
     const tokenCountAfter = trimmedTokens + systemPromptTokens;
+
+    // Validate that the strategy actually produced a result within budget.
+    // Custom strategies may return over-budget results, which defeats the purpose
+    // of the ContextManager and can lead to context overflow at the provider.
+    if (trimmedTokens > effectiveBudget) {
+      throw new Error(
+        `Context strategy '${this.options.strategy.name}' produced ${trimmedTokens} tokens, ` +
+          `exceeding effective budget of ${effectiveBudget} tokens. ` +
+          `The strategy returned a message list that is still too large.`,
+      );
+    }
+
     const dropped = messages.length - prepared.length;
     this._tokenCount = tokenCountAfter;
     this._trimCount++;

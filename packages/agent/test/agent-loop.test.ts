@@ -113,7 +113,7 @@ describe.skipIf(!auth)("agentLoop e2e", () => {
 
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results[0].iteration).toBe(1);
-    expect(results[0].result.usage.inputTokens).toBeGreaterThan(0);
+    expect(results[0].result.usage.input).toBeGreaterThan(0);
   });
 
   it("respects system prompt", async () => {

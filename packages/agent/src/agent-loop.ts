@@ -8,6 +8,7 @@ import type {
   StreamResult,
   Tool,
   ToolCall,
+  Usage,
 } from "@bookingcare/ai";
 import { streamSimple, Type } from "@bookingcare/ai";
 import { createToolDispatch } from "./tools.js";
@@ -122,8 +123,16 @@ export async function agentLoop(query: string, options: AgentLoopOptions) {
           const result: StreamResult = {
             text: textParts.join(""),
             toolCalls,
-            usage: msg.usage ?? { inputTokens: 0, outputTokens: 0 },
-            cost: undefined,
+            usage:
+              msg.usage ??
+              ({
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 0,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              } as Usage),
             stopReason: (msg.stopReason as StreamResult["stopReason"]) ?? "stop",
           };
           onStreamResult(result, iterations);
@@ -394,12 +403,7 @@ async function loop(
 interface StreamCollectResult {
   text: string;
   toolCalls: ToolCall[];
-  usage: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheCreationTokens?: number;
-    cacheReadTokens?: number;
-  };
+  usage: Usage;
   stopReason: StopReason;
   errorMessage?: string;
 }
@@ -411,7 +415,14 @@ async function collectStreamIntoMessage(
 ): Promise<StreamCollectResult | null> {
   let text = "";
   const toolCallParts = new Map<number, ToolCall>();
-  let usage = { inputTokens: 0, outputTokens: 0 };
+  let usage: Usage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
   let stopReason: StopReason = "unknown";
   let errorMessage: string | undefined;
 
@@ -456,14 +467,12 @@ async function collectStreamIntoMessage(
       case "done":
         stopReason = event.reason;
         usage = {
-          inputTokens: event.message.usage.inputTokens,
-          outputTokens: event.message.usage.outputTokens,
-          ...(event.message.usage.cacheCreationTokens != null && {
-            cacheCreationTokens: event.message.usage.cacheCreationTokens,
-          }),
-          ...(event.message.usage.cacheReadTokens != null && {
-            cacheReadTokens: event.message.usage.cacheReadTokens,
-          }),
+          input: event.message.usage.input,
+          output: event.message.usage.output,
+          cacheRead: event.message.usage.cacheRead,
+          cacheWrite: event.message.usage.cacheWrite,
+          totalTokens: event.message.usage.totalTokens,
+          cost: { ...event.message.usage.cost },
         };
         break;
 
@@ -471,8 +480,12 @@ async function collectStreamIntoMessage(
         stopReason = event.reason;
         errorMessage = event.error.errorMessage;
         usage = {
-          inputTokens: event.error.usage.inputTokens,
-          outputTokens: event.error.usage.outputTokens,
+          input: event.error.usage.input,
+          output: event.error.usage.output,
+          cacheRead: event.error.usage.cacheRead,
+          cacheWrite: event.error.usage.cacheWrite,
+          totalTokens: event.error.usage.totalTokens,
+          cost: { ...event.error.usage.cost },
         };
         break;
     }

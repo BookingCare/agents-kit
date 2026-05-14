@@ -10,6 +10,7 @@ import {
   type TextContent,
   type Tool,
   type Transport,
+  type Usage,
 } from "@bookingcare/ai";
 import type { Store, AgentInfo } from "@bookingcare/db";
 import { NotFoundError, serializeAgentState, createTodoSnapshot } from "@bookingcare/db";
@@ -41,9 +42,13 @@ function defaultConvertToLlm(messages: AgentMessage[]): Message[] {
   ) as Message[];
 }
 
-const EMPTY_USAGE = {
-  inputTokens: 0,
-  outputTokens: 0,
+const EMPTY_USAGE: Usage = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
 const DEFAULT_MODEL = {

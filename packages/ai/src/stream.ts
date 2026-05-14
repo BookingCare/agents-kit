@@ -62,7 +62,14 @@ export async function collectStream(
 ): Promise<StreamResult> {
   let text = "";
   const toolCallParts = new Map<number, ToolCall>();
-  const usage: Usage = { inputTokens: 0, outputTokens: 0 };
+  const usage: Usage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
   let stopReason: StopReason = "unknown";
 
   for await (const event of eventStream) {
@@ -91,18 +98,22 @@ export async function collectStream(
 
       case "done":
         stopReason = event.reason;
-        usage.inputTokens = event.message.usage.inputTokens;
-        usage.outputTokens = event.message.usage.outputTokens;
-        if (event.message.usage.cacheCreationTokens != null)
-          usage.cacheCreationTokens = event.message.usage.cacheCreationTokens;
-        if (event.message.usage.cacheReadTokens != null)
-          usage.cacheReadTokens = event.message.usage.cacheReadTokens;
+        usage.input = event.message.usage.input;
+        usage.output = event.message.usage.output;
+        usage.cacheRead = event.message.usage.cacheRead;
+        usage.cacheWrite = event.message.usage.cacheWrite;
+        usage.totalTokens = event.message.usage.totalTokens;
+        usage.cost = { ...event.message.usage.cost };
         break;
 
       case "error":
         stopReason = event.reason;
-        usage.inputTokens = event.error.usage.inputTokens;
-        usage.outputTokens = event.error.usage.outputTokens;
+        usage.input = event.error.usage.input;
+        usage.output = event.error.usage.output;
+        usage.cacheRead = event.error.usage.cacheRead;
+        usage.cacheWrite = event.error.usage.cacheWrite;
+        usage.totalTokens = event.error.usage.totalTokens;
+        usage.cost = { ...event.error.usage.cost };
         break;
     }
   }
@@ -111,9 +122,12 @@ export async function collectStream(
     .sort(([a], [b]) => a - b)
     .map(([, tc]) => tc);
 
-  const cost = model ? calculateCost(usage, model) : undefined;
+  // Calculate costs if model is provided
+  if (model) {
+    usage.cost = calculateCost(usage, model);
+  }
 
-  return { text, toolCalls, usage, cost, stopReason };
+  return { text, toolCalls, usage, stopReason };
 }
 
 /**

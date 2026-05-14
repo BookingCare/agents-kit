@@ -27,7 +27,14 @@ export function buildAssistantMessage(response: MockResponse): AssistantMessage 
     api: "openai-completions",
     provider: "openai",
     model: "test-model",
-    usage: { inputTokens: 10, outputTokens: 20 },
+    usage: {
+      input: 10,
+      output: 20,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 30,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
     stopReason: response.stopReason ?? "stop",
     timestamp: Date.now(),
   };

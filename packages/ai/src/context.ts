@@ -8,7 +8,6 @@ import type {
   Tool,
   ToolResultMessage,
   Usage,
-  Cost,
   TextContent,
   ImageContent,
   ThinkingContent,
@@ -31,7 +30,14 @@ const DEFAULT_MAX_MESSAGES = 1000;
  */
 export class Conversation {
   private messages: Message[] = [];
-  private _totalUsage: Usage = { inputTokens: 0, outputTokens: 0 };
+  private _totalUsage: Usage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
   private readonly maxMessages: number;
 
   constructor(maxMessages: number = DEFAULT_MAX_MESSAGES) {
@@ -87,8 +93,18 @@ export class Conversation {
     this.messages.push(assistantMsg);
     this.enforceMessageLimit();
 
-    this._totalUsage.inputTokens += result.usage.inputTokens;
-    this._totalUsage.outputTokens += result.usage.outputTokens;
+    this._totalUsage.input += result.usage.input;
+    this._totalUsage.output += result.usage.output;
+    this._totalUsage.cacheRead += result.usage.cacheRead;
+    this._totalUsage.cacheWrite += result.usage.cacheWrite;
+    this._totalUsage.totalTokens += result.usage.totalTokens;
+
+    // Update costs
+    this._totalUsage.cost.input += result.usage.cost.input;
+    this._totalUsage.cost.output += result.usage.cost.output;
+    this._totalUsage.cost.cacheRead += result.usage.cost.cacheRead;
+    this._totalUsage.cost.cacheWrite += result.usage.cost.cacheWrite;
+    this._totalUsage.cost.total += result.usage.cost.total;
 
     return result;
   }
@@ -129,7 +145,7 @@ export class Conversation {
   }
 
   /** Calculate total cost based on a specific model's pricing */
-  getTotalCost(model: Model<Api>): Cost {
+  getTotalCost(model: Model<Api>): Usage["cost"] {
     return calculateCost(this._totalUsage, model);
   }
 
