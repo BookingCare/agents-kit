@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `Usage` interface restructured: renamed fields (`inputTokens`→`input`, `outputTokens`→`output`), added `cacheRead`, `cacheWrite`, `totalTokens`, and embedded `cost` object
+- Removed standalone `Cost` interface - cost is now accessed via `usage.cost`
+- `StreamResult` no longer has a top-level `cost` field (use `result.usage.cost` instead)
+- `calculateCost()` now returns `Usage["cost"]` type with cache cost fields
+
 ## [0.2.0] - 2026-05-13
 
 ### Breaking Changes
