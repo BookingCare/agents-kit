@@ -260,8 +260,34 @@ async function loop(
       if (update.systemPrompt !== undefined) context.systemPrompt = update.systemPrompt;
     }
 
+    // Build the LLM context from persistent messages (with optional trim)
+    let contextMessages = messages.slice();
+
+    if (config.contextManager) {
+      const result = config.contextManager.prepareMessages(contextMessages, context.systemPrompt);
+      if (result.dropped > 0) {
+        await emit({
+          type: "context_trimmed",
+          droppedMessages: result.dropped,
+          remainingMessages: result.prepared.length,
+          budget: config.contextManager.budget,
+          tokenCountBefore: result.tokenCountBefore,
+          tokenCountAfter: result.tokenCountAfter,
+          strategyName: result.strategyName,
+        });
+      }
+      contextMessages = result.prepared;
+    }
+
+    // Apply context transformation (existing hook)
+    // Note: transformContext is expected not to grow the context. If it does,
+    // the result may exceed budget. Budget enforcement happens before this step.
+    if (config.transformContext) {
+      contextMessages = await config.transformContext(contextMessages, signal);
+    }
+
     // Convert agent messages to LLM messages
-    const llmMessages = await config.convertToLlm(messages);
+    const llmMessages = await config.convertToLlm(contextMessages);
     if (context.systemPrompt) {
       llmMessages.unshift({ role: "system", content: context.systemPrompt });
     }

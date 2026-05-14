@@ -32,6 +32,7 @@ import type {
   StreamingAssistantMessage,
   ToolExecutionMode,
 } from "./types.js";
+import type { ContextManager } from "./context-manager.js";
 
 function defaultConvertToLlm(messages: AgentMessage[]): Message[] {
   return messages.filter(
@@ -131,6 +132,8 @@ export interface AgentOptions {
   store?: Store;
   /** Optional todo manager for persisting todo state. */
   todoManager?: TodoManager;
+  /** Optional context manager for token budget management. */
+  contextManager?: ContextManager;
 }
 
 class PendingMessageQueue {
@@ -218,6 +221,8 @@ export class Agent {
   private store?: Store;
   private todoManager?: TodoManager;
   private createdAt?: number;
+  /** Optional context manager for token budget management. */
+  public contextManager?: ContextManager;
 
   constructor(options: AgentOptions = {}) {
     this._state = createMutableAgentState(options.initialState);
@@ -239,6 +244,7 @@ export class Agent {
     this.transport = options.transport ?? "auto";
     this.maxRetryDelayMs = options.maxRetryDelayMs;
     this.toolExecution = options.toolExecution ?? "parallel";
+    this.contextManager = options.contextManager;
   }
 
   /**
@@ -557,6 +563,7 @@ export class Agent {
         return this.steeringQueue.drain();
       },
       getFollowUpMessages: async () => this.followUpQueue.drain(),
+      contextManager: this.contextManager,
     };
   }
 
@@ -674,6 +681,10 @@ export class Agent {
             `[agent] persistence failed: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
+        break;
+
+      case "context_trimmed":
+        // No internal state change needed; event is forwarded to listeners
         break;
     }
 
