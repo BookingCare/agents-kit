@@ -23,7 +23,9 @@ import type {
   Usage,
   UserMessage,
 } from "../types.js";
+import { isToolCall } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
+import { parseStreamingJson } from "../utils/json-parse.js";
 import { detectAzureOpenAIConfig } from "../utils/env-api-keys.js";
 import { AIError } from "../utils/error.js";
 
@@ -108,7 +110,7 @@ function convertMessages(messages: Message[]): ChatCompletionMessageParam[] {
             tool_calls: toolCalls.map((tc) => ({
               id: tc.id,
               type: "function" as const,
-              function: { name: tc.name, arguments: tc.arguments },
+              function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
             })),
           }),
         };
@@ -153,10 +155,15 @@ function mapFinishReason(reason: string | null): StopReason {
   }
 }
 
-function buildParams(model: Model<Api>, context: Context, options?: StreamOptions) {
+export function buildParams(model: Model<Api>, context: Context, options?: StreamOptions) {
+  const messages: Message[] = [];
+  if (context.systemPrompt) {
+    messages.push({ role: "system", content: context.systemPrompt });
+  }
+  messages.push(...context.messages);
   return {
     model: model.id,
-    messages: convertMessages(context.messages),
+    messages: convertMessages(messages),
     stream: true as const,
     stream_options: { include_usage: true as const },
     ...(context.tools?.length && { tools: convertTools(context.tools) }),
@@ -217,7 +224,11 @@ export const streamAzureOpenAICompletions: StreamFunction<
         totalTokens: 0,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
       };
-      const toolCallParts = new Map<number, ToolCall>();
+      // Track tool call parts with parsed arguments for streaming
+      interface ToolCallPart extends ToolCall {
+        partialArguments?: string;
+      }
+      const toolCallParts = new Map<number, ToolCallPart>();
       let textBuf = "";
       let contentIndex = 0;
       let textContentIndex = -1;
@@ -252,14 +263,34 @@ export const streamAzureOpenAICompletions: StreamFunction<
             if (!tcPart) {
               toolcallContentIndex = contentIndex++;
               tcPart = {
+                type: "toolCall",
                 id: tc.id ?? "",
                 name: tc.function?.name ?? "",
-                arguments: "",
+                arguments: {},
+                partialArguments: "",
               };
               toolCallParts.set(idx, tcPart);
+
+              // Add partial tool call to content for streaming
+              partial.content.push({
+                type: "toolCall",
+                id: tc.id ?? "",
+                name: tc.function?.name ?? "",
+                arguments: {},
+              });
               stream.push({ type: "toolcall_start", contentIndex: toolcallContentIndex, partial });
             }
-            if (tc.function?.arguments) tcPart.arguments += tc.function.arguments;
+            if (tc.function?.arguments) {
+              tcPart.partialArguments += tc.function.arguments;
+              // Parse arguments incrementally during streaming
+              tcPart.arguments = parseStreamingJson(tcPart.partialArguments);
+
+              // Update partial content with parsed arguments
+              const partialToolCall = partial.content[toolcallContentIndex!];
+              if (partialToolCall && isToolCall(partialToolCall)) {
+                partialToolCall.arguments = tcPart.arguments;
+              }
+            }
             stream.push({
               type: "toolcall_delta",
               contentIndex: toolcallContentIndex!,
@@ -317,7 +348,13 @@ export const streamAzureOpenAICompletions: StreamFunction<
             });
           }
           for (const [idx, tc] of toolCallParts) {
-            stream.push({ type: "toolcall_end", contentIndex: idx, toolCall: tc, partial });
+            const { partialArguments: _, ...finalToolCall } = tc;
+            stream.push({
+              type: "toolcall_end",
+              contentIndex: idx,
+              toolCall: finalToolCall,
+              partial,
+            });
           }
         }
       }
@@ -326,7 +363,11 @@ export const streamAzureOpenAICompletions: StreamFunction<
         const stopReason = mapFinishReason(finishReason);
         const content: (TextContent | ToolCall)[] = [];
         if (textBuf) content.push({ type: "text", text: textBuf });
-        for (const [, tc] of toolCallParts) content.push(tc);
+        for (const [, tc] of toolCallParts) {
+          // Final tool call uses parsed arguments as per ToolCall interface
+          const { partialArguments, ...rest } = tc;
+          content.push(rest);
+        }
 
         const message: AssistantMessage = {
           role: "assistant",

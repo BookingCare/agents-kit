@@ -95,7 +95,7 @@ describe("Agent", () => {
     const streamFn = createMockStream([
       {
         text: "",
-        toolCalls: [{ id: "tc1", name: "echo", arguments: '{"message":"hi"}' }],
+        toolCalls: [{ type: "toolCall", id: "tc1", name: "echo", arguments: { message: "hi" } }],
         stopReason: "toolUse",
       },
       { text: "Done" },
@@ -146,7 +146,7 @@ describe("Agent", () => {
     const streamFn = createMockStream([
       {
         text: "",
-        toolCalls: [{ id: "tc1", name: "fail", arguments: "{}" }],
+        toolCalls: [{ type: "toolCall", id: "tc1", name: "fail", arguments: {} }],
         stopReason: "toolUse",
       },
       { text: "Recovered" },
@@ -211,7 +211,7 @@ describe("Agent", () => {
     const streamFn = createMockStream([
       {
         text: "",
-        toolCalls: [{ id: "tc1", name: "echo", arguments: '{"message":"first"}' }],
+        toolCalls: [{ type: "toolCall", id: "tc1", name: "echo", arguments: { message: "first" } }],
         stopReason: "toolUse",
       },
       { text: "Final" },

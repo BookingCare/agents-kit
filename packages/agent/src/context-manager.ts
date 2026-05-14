@@ -1,5 +1,6 @@
 import type { AgentMessage, ContextStrategy, TokenCounter } from "./types.js";
 import type { ToolCall, Usage } from "@bookingcare/ai";
+import { isToolCall } from "@bookingcare/ai";
 
 /**
  * Manages token budget and context trimming for agent messages.
@@ -59,35 +60,19 @@ export class ContextManager implements TokenCounter {
       chars = message.content.length;
     } else if (Array.isArray(message.content)) {
       for (const part of message.content) {
-        if (typeof part === "object" && "text" in part) {
-          chars += (part as { text: string }).text.length;
-        } else if (this.isToolCall(part)) {
-          // ToolCall: count id + name + arguments (actual content, not fixed overhead)
-          chars += part.id.length + part.name.length + part.arguments.length;
+        if ("text" in part) {
+          chars += part.text.length;
+        } else if (isToolCall(part)) {
+          const partTyped = part as { id: string; name: string; arguments: unknown };
+          const argsLength = JSON.stringify(partTyped.arguments).length;
+          chars += partTyped.id.length + partTyped.name.length + argsLength;
         } else {
-          // image or other: estimate fixed overhead
           chars += 200;
         }
       }
     }
     // Base overhead per message (role, formatting)
     return Math.ceil(chars / 4) + 3;
-  }
-
-  /**
-   * Type guard for ToolCall content parts.
-   */
-  private isToolCall(part: unknown): part is ToolCall {
-    return (
-      typeof part === "object" &&
-      part !== null &&
-      "id" in part &&
-      "name" in part &&
-      "arguments" in part &&
-      typeof (part as ToolCall).id === "string" &&
-      typeof (part as ToolCall).name === "string" &&
-      typeof (part as ToolCall).arguments === "string"
-    );
   }
 
   count(messages: AgentMessage[]): number {

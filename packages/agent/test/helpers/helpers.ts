@@ -1,10 +1,16 @@
 import { vi } from "vitest";
-import type { AssistantMessage, Model, SimpleStreamOptions, StopReason } from "@bookingcare/ai";
+import type {
+  AssistantMessage,
+  Model,
+  SimpleStreamOptions,
+  StopReason,
+  ToolCall,
+} from "@bookingcare/ai";
 import { createAssistantMessageEventStream } from "@bookingcare/ai";
 
 export interface MockResponse {
   text?: string;
-  toolCalls?: { id: string; name: string; arguments: string }[];
+  toolCalls?: ToolCall[];
   stopReason?: StopReason;
 }
 
@@ -18,7 +24,7 @@ export function buildAssistantMessage(response: MockResponse): AssistantMessage 
   }
   if (response.toolCalls) {
     for (const tc of response.toolCalls) {
-      content.push({ id: tc.id, name: tc.name, arguments: tc.arguments });
+      content.push({ type: "toolCall", id: tc.id, name: tc.name, arguments: tc.arguments });
     }
   }
   return {
@@ -78,7 +84,7 @@ export function createMockStream(responses: MockResponse[]) {
         stream.push({
           type: "toolcall_delta",
           contentIndex: i,
-          delta: tc.arguments,
+          delta: "",
           partial: assistant,
         });
         stream.push({ type: "toolcall_end", contentIndex: i, toolCall: tc, partial: assistant });

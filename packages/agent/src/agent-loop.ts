@@ -453,11 +453,17 @@ async function collectStreamIntoMessage(
         if (toolCallParts.size >= MAX_TOOL_CALLS) {
           throw new Error(`Too many tool calls (max ${MAX_TOOL_CALLS})`);
         }
-        toolCallParts.set(event.contentIndex, { id: "", name: "", arguments: "" });
+        toolCallParts.set(event.contentIndex, {
+          type: "toolCall",
+          id: "",
+          name: "",
+          arguments: {},
+        });
         break;
 
       case "toolcall_delta":
-        toolCallParts.get(event.contentIndex)!.arguments += event.delta;
+        // Note: toolcall_delta with object arguments requires provider-side handling
+        // This is a no-op for now since providers handle argument parsing
         break;
 
       case "toolcall_end":
@@ -511,19 +517,7 @@ async function executeToolCalls(
   const toolMap = new Map(tools.map((t) => [t.name, t] as [string, AgentTool]));
 
   const execute = async (toolCall: ToolCall): Promise<AgentMessage> => {
-    let args: Record<string, unknown>;
-    try {
-      args = JSON.parse(toolCall.arguments) as Record<string, unknown>;
-    } catch (e) {
-      return {
-        role: "toolResult",
-        toolCallId: toolCall.id,
-        toolName: toolCall.name,
-        content: [{ type: "text" as const, text: `Error: ${(e as Error).message}` }],
-        isError: true,
-        timestamp: Date.now(),
-      };
-    }
+    let args = toolCall.arguments as Record<string, unknown>;
     // Resolve tool, prepare arguments, execute
     const toolDef = toolMap.get(toolCall.name);
 

@@ -33,6 +33,8 @@ export function isToolCall(content: unknown): content is ToolCall {
   return (
     typeof content === "object" &&
     content !== null &&
+    "type" in content &&
+    (content as Record<string, unknown>).type === "toolCall" &&
     "id" in content &&
     "name" in content &&
     "arguments" in content
@@ -102,10 +104,10 @@ export interface Tool<TParams extends TSchema = TSchema> {
 export type ToolDefinition = Tool;
 
 export interface ToolCall {
+  type: "toolCall";
   id: string;
   name: string;
-  /** JSON-encoded arguments string */
-  arguments: string;
+  arguments: Record<string, any>;
 }
 
 // === Stop Reason ===
@@ -252,6 +254,7 @@ export interface ProviderResponse {
 
 /** Conversation context: messages and available tools. */
 export interface Context {
+  systemPrompt?: string;
   messages: Message[];
   tools?: Tool[];
 }

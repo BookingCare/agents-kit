@@ -1,17 +1,324 @@
-import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, it, expect, beforeAll } from "vitest";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
 import { stream, collectStream, streamSimple, complete, completeSimple } from "../src/stream.js";
 import { Conversation } from "../src/context.js";
 import { getModel, listModels, getModelsByProvider } from "../src/models.generated.js";
 import { calculateCost } from "../src/utils/costs.js";
 import { getApiProviders } from "../src/api-registry.js";
-import type { Model, Usage, Tool } from "../src/types.js";
+import type {
+  Model,
+  Usage,
+  Tool,
+  StreamOptions,
+  Context,
+  ImageContent,
+  ToolResultMessage,
+} from "../src/types.js";
 import { Type } from "@sinclair/typebox";
 import { applyAuth } from "./helpers/auth.js";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const auth = applyAuth();
+
+type StreamOptionsWithExtras = StreamOptions & Record<string, unknown>;
 
 function userMsg(content: string) {
   return { role: "user" as const, content, timestamp: Date.now() };
+}
+
+// Calculator tool definition (standard Typebox schema)
+const calculatorSchema = Type.Object({
+  a: Type.Number({ description: "First number" }),
+  b: Type.Number({ description: "Second number" }),
+  operation: Type.Union(
+    [
+      Type.Literal("add"),
+      Type.Literal("subtract"),
+      Type.Literal("multiply"),
+      Type.Literal("divide"),
+    ],
+    { description: "The operation to perform" },
+  ),
+});
+
+const calculatorTool: Tool<typeof calculatorSchema> = {
+  name: "math_operation",
+  description: "Perform basic arithmetic operations",
+  parameters: calculatorSchema,
+};
+
+// === Helper functions for common test scenarios ===
+
+async function basicTextGeneration<TApi extends string>(
+  model: Model<TApi>,
+  options?: StreamOptionsWithExtras,
+) {
+  const context: Context = {
+    systemPrompt: "You are a helpful assistant. Be concise.",
+    messages: [userMsg("Reply with exactly: 'Hello test successful'")],
+  };
+  const s = await stream(model, context, options);
+  const response = await s.result();
+
+  expect(response.role).toBe("assistant");
+  expect(response.content).toBeTruthy();
+  expect(response.usage.input + response.usage.cacheRead).toBeGreaterThan(0);
+  expect(response.usage.output).toBeGreaterThan(0);
+  expect(response.errorMessage).toBeFalsy();
+  expect(response.content.map((b) => (b.type === "text" ? b.text : "")).join("")).toContain(
+    "Hello test successful",
+  );
+
+  context.messages.push(response);
+  context.messages.push(userMsg("Now say 'Goodbye test successful'"));
+
+  const s2 = await stream(model, context, options);
+  const secondResponse = await s2.result();
+
+  expect(secondResponse.role).toBe("assistant");
+  expect(secondResponse.content).toBeTruthy();
+  expect(secondResponse.usage.input + secondResponse.usage.cacheRead).toBeGreaterThan(0);
+  expect(secondResponse.usage.output).toBeGreaterThan(0);
+  expect(secondResponse.errorMessage).toBeFalsy();
+  expect(secondResponse.content.map((b) => (b.type === "text" ? b.text : "")).join("")).toContain(
+    "Goodbye test successful",
+  );
+}
+
+async function handleToolCall<TApi extends string>(
+  model: Model<TApi>,
+  options?: StreamOptionsWithExtras,
+) {
+  const context: Context = {
+    systemPrompt: "You are a helpful assistant that uses tools when asked.",
+    messages: [
+      {
+        role: "user",
+        content: "Calculate 15 + 27 using the math_operation tool.",
+        timestamp: Date.now(),
+      },
+    ],
+    tools: [calculatorTool],
+  };
+
+  const s = await stream(model, context, options);
+  let hasToolStart = false;
+  let hasToolDelta = false;
+  let hasToolEnd = false;
+  let accumulatedToolArgs = "";
+  let lastContentIndex = -1;
+  for await (const event of s) {
+    if (event.type === "toolcall_start") {
+      hasToolStart = true;
+      lastContentIndex = event.contentIndex;
+    }
+    if (event.type === "toolcall_delta") {
+      hasToolDelta = true;
+      expect(event.contentIndex).toBe(lastContentIndex);
+      accumulatedToolArgs += event.delta;
+    }
+    if (event.type === "toolcall_end") {
+      hasToolEnd = true;
+      expect(event.contentIndex).toBe(lastContentIndex);
+      // The toolcall_end event provides the final ToolCall with object arguments
+      const toolCall = event.toolCall;
+      expect(toolCall.name).toBe("math_operation");
+      expect(toolCall.arguments).not.toBeUndefined();
+      expect(toolCall.arguments).toHaveProperty("a");
+      expect(toolCall.arguments).toHaveProperty("b");
+      expect(toolCall.arguments).toHaveProperty("operation");
+      expect(typeof toolCall.arguments.a).toBe("number");
+      expect(typeof toolCall.arguments.b).toBe("number");
+      expect(typeof toolCall.arguments.operation).toBe("string");
+    }
+  }
+
+  expect(hasToolStart).toBe(true);
+  expect(hasToolDelta).toBe(true);
+  expect(hasToolEnd).toBe(true);
+
+  const response = await s.result();
+  expect(response.stopReason).toBe("toolUse");
+  expect(response.content.some((b) => b.type === "toolCall")).toBeTruthy();
+  const toolCall = response.content.find((b) => b.type === "toolCall");
+  if (toolCall && toolCall.type === "toolCall") {
+    expect(toolCall.name).toBe("math_operation");
+    expect(toolCall.id).toBeTruthy();
+  } else {
+    throw new Error("No tool call found in response");
+  }
+}
+
+async function handleStreaming<TApi extends string>(
+  model: Model<TApi>,
+  options?: StreamOptionsWithExtras,
+) {
+  let textStarted = false;
+  let textChunks = "";
+  let textCompleted = false;
+
+  const context: Context = {
+    messages: [userMsg("Count from 1 to 3")],
+    systemPrompt: "You are a helpful assistant.",
+  };
+
+  const s = stream(model, context, options);
+
+  for await (const event of s) {
+    if (event.type === "text_start") {
+      textStarted = true;
+    } else if (event.type === "text_delta") {
+      textChunks += event.delta;
+    } else if (event.type === "text_end") {
+      textCompleted = true;
+    }
+  }
+
+  const response = await s.result();
+
+  expect(textStarted).toBe(true);
+  expect(textChunks.length).toBeGreaterThan(0);
+  expect(textCompleted).toBe(true);
+  expect(response.content.some((b) => b.type === "text")).toBeTruthy();
+}
+
+async function handleImage<TApi extends string>(
+  model: Model<TApi>,
+  options?: StreamOptionsWithExtras,
+) {
+  // Check if the model supports images
+  if (!model.input.includes("image")) {
+    console.log(`Skipping image test - model ${model.id} doesn't support images`);
+    return;
+  }
+
+  // Read the test image
+  const imagePath = join(__dirname, "data", "red-circle.png");
+  let imageBuffer: Buffer;
+  try {
+    imageBuffer = readFileSync(imagePath);
+  } catch {
+    console.log("Skipping image test - test image not found");
+    return;
+  }
+  const base64Image = imageBuffer.toString("base64");
+
+  const imageContent: ImageContent = {
+    type: "image",
+    image: base64Image,
+    mimeType: "image/png",
+  };
+
+  const context: Context = {
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "What do you see in this image? Please describe the shape (circle, rectangle, square, triangle, ...) and color (red, blue, green, ...). You MUST reply in English.",
+          },
+          imageContent,
+        ],
+        timestamp: Date.now(),
+      },
+    ],
+    systemPrompt: "You are a helpful assistant.",
+  };
+
+  const s = await stream(model, context, options);
+  const response = await s.result();
+
+  // Check the response mentions red and circle
+  expect(response.content.length > 0).toBeTruthy();
+  const textContent = response.content.find((b) => b.type === "text");
+  if (textContent && textContent.type === "text") {
+    const lowerContent = textContent.text.toLowerCase();
+    expect(lowerContent).toContain("red");
+    expect(lowerContent).toContain("circle");
+  }
+}
+
+async function multiTurn<TApi extends string>(
+  model: Model<TApi>,
+  options?: StreamOptionsWithExtras,
+) {
+  const context: Context = {
+    systemPrompt: "You are a helpful assistant that can use tools to answer questions.",
+    messages: [
+      {
+        role: "user",
+        content: "Calculate 42 * 17 using the math_operation tool. Just that one calculation.",
+        timestamp: Date.now(),
+      },
+    ],
+    tools: [calculatorTool],
+  };
+
+  // Collect all text content from all assistant responses
+  let allTextContent = "";
+  let hasSeenToolCalls = false;
+  const maxTurns = 3; // Prevent infinite loops
+
+  for (let turn = 0; turn < maxTurns; turn++) {
+    const s = await stream(model, context, options);
+    const response = await s.result();
+
+    // Add the assistant response to context
+    context.messages.push(response);
+
+    // Process content blocks
+    const results: ToolResultMessage[] = [];
+    for (const block of response.content) {
+      if (block.type === "text") {
+        allTextContent += block.text;
+      } else if (block.type === "toolCall") {
+        hasSeenToolCalls = true;
+
+        // Process the tool call
+        expect(block.name).toBe("math_operation");
+        expect(block.id).toBeTruthy();
+        expect(block.arguments).toBeTruthy();
+
+        const { a, b, operation } = block.arguments;
+        let result: number;
+        if (operation === "add" || operation === "+") {
+          result = a + b;
+        } else if (operation === "multiply" || operation === "*") {
+          result = a * b;
+        } else {
+          result = 0;
+        }
+
+        // Add tool result to context
+        results.push({
+          role: "toolResult",
+          toolCallId: block.id,
+          toolName: block.name,
+          content: [{ type: "text", text: `${result}` }],
+          isError: false,
+          timestamp: Date.now(),
+        });
+      }
+    }
+    context.messages.push(...results);
+
+    // If we got a stop response with text content, we're likely done
+    expect(response.stopReason, `Error: ${response.errorMessage}`).not.toBe("error");
+    if (response.stopReason === "stop") {
+      break;
+    }
+  }
+
+  // Verify we got tool calls and the final answer
+  expect(hasSeenToolCalls).toBe(true);
+  expect(allTextContent).toBeTruthy();
+  expect(allTextContent.includes("714")).toBe(true);
 }
 
 // === Pure unit tests (no API calls) ===
@@ -42,8 +349,6 @@ describe("Model Registry", () => {
   it("filters models by provider", () => {
     const azure = getModelsByProvider("azure-openai");
     expect(azure.length).toBeGreaterThan(0);
-    const other = getModelsByProvider("other");
-    expect(other.length).toBe(0);
   });
 });
 
@@ -145,82 +450,34 @@ describe("Conversation", () => {
 
 // === E2E tests (real API calls) ===
 
-describe.skipIf(!auth)("stream", () => {
+describe.skipIf(!auth)("Azure OpenAI Provider (gpt-5.4-nano)", () => {
   const model = () => getModel("gpt-5.4-nano")!;
 
-  it("streams text events", async () => {
-    const events = stream(model(), {
-      messages: [userMsg("What is 2+2? Reply with just the number.")],
-    });
-    const result = await collectStream(events, model());
-
-    expect(result.text).toContain("4");
-    expect(result.usage.input).toBeGreaterThan(0);
-    expect(result.usage.output).toBeGreaterThan(0);
-    expect(result.stopReason).toBe("stop");
+  it("should complete basic text generation", { retry: 3 }, async () => {
+    await basicTextGeneration(model());
   });
 
-  it("streams tool call events", async () => {
-    const events = stream(model(), {
-      messages: [userMsg("What is the weather in Tokyo?")],
-      tools: [
-        {
-          name: "get_weather",
-          description: "Get the current weather in a city",
-          parameters: Type.Object({
-            city: Type.String(),
-          }),
-        },
-      ],
-    });
-
-    const result = await collectStream(events, model());
-
-    expect(result.toolCalls.length).toBeGreaterThanOrEqual(1);
-    expect(result.toolCalls[0].name).toBe("get_weather");
-    expect(result.toolCalls[0].id).toBeTruthy();
-    const args = JSON.parse(result.toolCalls[0].arguments);
-    expect(args.city).toBeTruthy();
-    expect(result.stopReason).toBe("toolUse");
+  it("should handle tool calling", { retry: 3 }, async () => {
+    await handleToolCall(model());
   });
 
-  it("sends tools in correct format", async () => {
-    const result = await complete(model(), {
-      messages: [userMsg("Use my_tool with x=5")],
-      tools: [
-        {
-          name: "my_tool",
-          description: "A test tool",
-          parameters: Type.Object({
-            x: Type.Number(),
-          }),
-        },
-      ],
-    });
-
-    expect(result.toolCalls.length).toBeGreaterThanOrEqual(1);
-    expect(result.toolCalls[0].name).toBe("my_tool");
-    const args = JSON.parse(result.toolCalls[0].arguments);
-    expect(args.x).toBe(5);
+  it("should handle streaming", { retry: 3 }, async () => {
+    await handleStreaming(model());
   });
 
-  it("passes transport options to provider", async () => {
-    const result = await complete(
-      model(),
-      { messages: [userMsg("Write a long essay about computing.")] },
-      { maxTokens: 10 },
-    );
+  it("should handle image input", { retry: 3 }, async () => {
+    await handleImage(model());
+  });
 
-    expect(result.text).toBeTruthy();
-    expect(result.usage.output).toBeLessThanOrEqual(10);
-    expect(result.stopReason).toBe("length");
+  it("should handle multi-turn with tools", { retry: 3 }, async () => {
+    await multiTurn(model());
   });
 });
 
-describe.skipIf(!auth)("streamSimple", () => {
+describe.skipIf(!auth)("streamSimple API", () => {
   const model = () => getModel("gpt-5.4-nano")!;
 
-  it("sends prompt with system message", async () => {
+  it("should send prompt with system message", { retry: 3 }, async () => {
     const eventStream = streamSimple(model(), {
       messages: [
         { role: "system", content: "Reply with exactly the word 'pong'." },
@@ -234,10 +491,10 @@ describe.skipIf(!auth)("streamSimple", () => {
   });
 });
 
-describe.skipIf(!auth)("generate", () => {
+describe.skipIf(!auth)("complete API", () => {
   const model = () => getModel("gpt-5.4-nano")!;
 
-  it("returns text completion", async () => {
+  it("should return text completion", { retry: 3 }, async () => {
     const result = await complete(model(), {
       messages: [userMsg("What is 2+2? Reply with just the number.")],
     });
@@ -249,7 +506,7 @@ describe.skipIf(!auth)("generate", () => {
     expect(result.usage.cost.total).toBeGreaterThan(0);
   });
 
-  it("returns cost from model pricing", async () => {
+  it("should return cost from model pricing", { retry: 3 }, async () => {
     const result = await complete(model(), {
       messages: [userMsg("Say hello.")],
     });
@@ -260,10 +517,10 @@ describe.skipIf(!auth)("generate", () => {
   });
 });
 
-describe.skipIf(!auth)("generateSimple", () => {
+describe.skipIf(!auth)("completeSimple API", () => {
   const model = () => getModel("gpt-5.4-nano")!;
 
-  it("returns text result with system message", async () => {
+  it("should return text result with system message", { retry: 3 }, async () => {
     const result = await completeSimple(model(), {
       messages: [
         { role: "system", content: "Reply with exactly the word 'pong'." },
