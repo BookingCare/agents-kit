@@ -94,6 +94,25 @@ export function parseJsonWithRepair<T>(json: string): T {
   }
 }
 
+function attemptParse(input: string): unknown {
+  try {
+    return parseJsonWithRepair(input);
+  } catch {
+    /* continue */
+  }
+  try {
+    return partialParse(input);
+  } catch {
+    /* continue */
+  }
+  try {
+    return partialParse(repairJson(input));
+  } catch {
+    /* continue */
+  }
+  return undefined;
+}
+
 /**
  * Attempts to parse potentially incomplete JSON during streaming.
  * Always returns a valid object, even if JSON is incomplete.
@@ -107,20 +126,5 @@ export function parseStreamingJson<T = Record<string, unknown>>(
   if (!partialJson || partialJson.trim() === "") {
     return {} as T;
   }
-
-  try {
-    return parseJsonWithRepair<T>(partialJson);
-  } catch {
-    try {
-      const result = partialParse(partialJson);
-      return (result ?? {}) as T;
-    } catch {
-      try {
-        const result = partialParse(repairJson(partialJson));
-        return (result ?? {}) as T;
-      } catch {
-        return {} as T;
-      }
-    }
-  }
+  return (attemptParse(partialJson) ?? {}) as T;
 }

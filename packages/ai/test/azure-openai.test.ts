@@ -15,16 +15,19 @@ const testModel: Model<"azure-openai-completions"> = {
   maxTokens: 100,
 };
 
+function makeContext(overrides: Partial<Context> = {}): Context {
+  return {
+    messages: [{ role: "user", content: "Hello", timestamp: 0 }],
+    ...overrides,
+  };
+}
+
 describe("buildParams", () => {
   it("prepends systemPrompt as a system message", () => {
-    const context: Context = {
-      systemPrompt: "You are a test assistant.",
-      messages: [
-        { role: "user", content: "Hello", timestamp: Date.now() },
-      ],
-    };
-
-    const params = buildParams(testModel, context);
+    const params = buildParams(
+      testModel,
+      makeContext({ systemPrompt: "You are a test assistant." }),
+    );
 
     expect(params.messages).toHaveLength(2);
     expect(params.messages[0]).toEqual({ role: "system", content: "You are a test assistant." });
@@ -32,35 +35,21 @@ describe("buildParams", () => {
   });
 
   it("does not add a system message when systemPrompt is absent", () => {
-    const context: Context = {
-      messages: [
-        { role: "user", content: "Hello", timestamp: Date.now() },
-      ],
-    };
-
-    const params = buildParams(testModel, context);
+    const params = buildParams(testModel, makeContext());
 
     expect(params.messages).toHaveLength(1);
     expect(params.messages[0]).toEqual({ role: "user", content: "Hello" });
   });
 
   it("propagates stream_options.include_usage as true", () => {
-    const context: Context = {
-      messages: [{ role: "user", content: "Hi", timestamp: Date.now() }],
-    };
-
-    const params = buildParams(testModel, context);
+    const params = buildParams(testModel, makeContext());
 
     expect(params.stream).toBe(true);
     expect(params.stream_options).toEqual({ include_usage: true });
   });
 
   it("forwards optional fields from StreamOptions", () => {
-    const context: Context = {
-      messages: [{ role: "user", content: "Hi", timestamp: Date.now() }],
-    };
-
-    const params = buildParams(testModel, context, {
+    const params = buildParams(testModel, makeContext(), {
       temperature: 0.5,
       maxTokens: 256,
       topP: 0.9,
@@ -74,11 +63,7 @@ describe("buildParams", () => {
   });
 
   it("sets model id from the model object", () => {
-    const context: Context = {
-      messages: [{ role: "user", content: "Hi", timestamp: Date.now() }],
-    };
-
-    const params = buildParams(testModel, context);
+    const params = buildParams(testModel, makeContext());
 
     expect(params.model).toBe("gpt-test");
   });

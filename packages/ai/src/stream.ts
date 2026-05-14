@@ -56,6 +56,15 @@ export function streamSimple<TApi extends Api>(
  */
 const MAX_TOOL_CALLS = 128;
 
+function copyUsage(target: Usage, source: Usage): void {
+  target.input = source.input;
+  target.output = source.output;
+  target.cacheRead = source.cacheRead;
+  target.cacheWrite = source.cacheWrite;
+  target.totalTokens = source.totalTokens;
+  target.cost = { ...source.cost };
+}
+
 export async function collectStream(
   eventStream: AssistantMessageEventStream,
   model?: Model<Api>,
@@ -104,22 +113,12 @@ export async function collectStream(
 
       case "done":
         stopReason = event.reason;
-        usage.input = event.message.usage.input;
-        usage.output = event.message.usage.output;
-        usage.cacheRead = event.message.usage.cacheRead;
-        usage.cacheWrite = event.message.usage.cacheWrite;
-        usage.totalTokens = event.message.usage.totalTokens;
-        usage.cost = { ...event.message.usage.cost };
+        copyUsage(usage, event.message.usage);
         break;
 
       case "error":
         stopReason = event.reason;
-        usage.input = event.error.usage.input;
-        usage.output = event.error.usage.output;
-        usage.cacheRead = event.error.usage.cacheRead;
-        usage.cacheWrite = event.error.usage.cacheWrite;
-        usage.totalTokens = event.error.usage.totalTokens;
-        usage.cost = { ...event.error.usage.cost };
+        copyUsage(usage, event.error.usage);
         break;
     }
   }
