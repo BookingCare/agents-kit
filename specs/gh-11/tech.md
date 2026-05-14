@@ -51,7 +51,7 @@ The `messages` array grows monotonically across iterations.
 
 ### Context transformation
 
-`AgentLoopConfig.transformContext` exists as a pass-through hook (types.ts line ~92-94). It's called before `convertToLlm`, receives the full `AgentMessage[]`, and returns (possibly) modified `AgentMessage[]`. It's currently async and optional.
+`AgentLoopConfig.transformContext` exists on the config type (types.ts line ~102) but is **not currently invoked** in `agent-loop.ts`. The spec proposes adding this call as part of the ContextManager integration, running it after `prepareMessages` and before `convertToLlm`.
 
 ### No token tracking
 
@@ -149,38 +149,66 @@ export class ContextManager implements TokenCounter {
   }
 
   /**
-   * Analyze messages and trim if over budget.
+   * Name of the currently active strategy.
+   */
+  get strategyName(): string {
+    return this.options.strategy.name;
+  }
+
+  /**
+   * Analyze messages and trim if over budget, accounting for an optional
+   * system prompt that will be prepended to the LLM context.
+   *
    * Returns the message list to send to the LLM.
    * Also returns metadata about what was trimmed.
    *
-   * `tokenCount` reflects the prepared (trimmed) message list.
+   * `tokenCount` reflects the prepared (trimmed) message list, including
+   * the estimated system prompt tokens if one is provided.
    */
-  prepareMessages(messages: AgentMessage[]): {
+  prepareMessages(
+    messages: AgentMessage[],
+    systemPrompt?: string,
+  ): {
     prepared: AgentMessage[];
     dropped: number;
     tokenCountBefore: number;
     tokenCountAfter: number;
+    strategyName: string;
   } {
+    // Reserve budget for system prompt, if present
+    const systemPromptTokens = systemPrompt ? Math.ceil(systemPrompt.length / 4) + 3 : 0;
+    const effectiveBudget = Math.max(0, this.options.budget - systemPromptTokens);
+
     const tokenCountBefore = this.count(messages);
 
-    if (tokenCountBefore <= this.options.budget) {
-      this._tokenCount = tokenCountBefore;
+    if (tokenCountBefore <= effectiveBudget) {
+      const totalBefore = tokenCountBefore + systemPromptTokens;
+      const totalAfter = totalBefore;
+      this._tokenCount = totalAfter;
       return {
         prepared: messages,
         dropped: 0,
-        tokenCountBefore,
-        tokenCountAfter: tokenCountBefore,
+        tokenCountBefore: totalBefore,
+        tokenCountAfter: totalAfter,
+        strategyName: this.strategyName,
       };
     }
 
-    // Apply strategy
-    const prepared = this.options.strategy.apply(messages, this.options.budget, this);
-    const tokenCountAfter = this.count(prepared);
+    // Apply strategy with reduced budget (accounting for system prompt)
+    const prepared = this.options.strategy.apply(messages, effectiveBudget, this);
+    const trimmedTokens = this.count(prepared);
+    const tokenCountAfter = trimmedTokens + systemPromptTokens;
     const dropped = messages.length - prepared.length;
     this._tokenCount = tokenCountAfter;
     this._trimCount++;
 
-    return { prepared, dropped, tokenCountBefore, tokenCountAfter };
+    return {
+      prepared,
+      dropped,
+      tokenCountBefore: tokenCountBefore + systemPromptTokens,
+      tokenCountAfter,
+      strategyName: this.strategyName,
+    };
   }
 }
 ```
@@ -259,8 +287,8 @@ Then in `loop()` (before `convertToLlm` call):
 ```typescript
 // === Context budget check and trim ===
 if (config.contextManager) {
-  const { prepared, dropped, tokenCountBefore, tokenCountAfter } =
-    config.contextManager.prepareMessages(messages);
+  const { prepared, dropped, tokenCountBefore, tokenCountAfter, strategyName } =
+    config.contextManager.prepareMessages(messages, context.systemPrompt);
 
   if (dropped > 0) {
     const trimEvent: AgentEvent = {
@@ -270,6 +298,7 @@ if (config.contextManager) {
       budget: config.contextManager.budget,
       tokenCountBefore,
       tokenCountAfter,
+      strategyName,
     };
     await emit(trimEvent);
   }
@@ -309,7 +338,7 @@ async function loop(
     let contextMessages = messages.slice();
 
     if (config.contextManager) {
-      const result = config.contextManager.prepareMessages(contextMessages);
+      const result = config.contextManager.prepareMessages(contextMessages, context.systemPrompt);
       if (result.dropped > 0) {
         await emit({
           type: "context_trimmed",
@@ -318,7 +347,7 @@ async function loop(
           budget: config.contextManager.budget,
           tokenCountBefore: result.tokenCountBefore,
           tokenCountAfter: result.tokenCountAfter,
-          strategyName: config.contextManager.options.strategy.name,
+          strategyName: result.strategyName,
         });
       }
       contextMessages = result.prepared;
@@ -455,15 +484,15 @@ User: new Agent({ model, tools, contextManager: new ContextManager({ budget: 100
 User: agent.prompt("Long running task")
   → runAgentLoop → loop()
   → for (;;) {
-    → contextManager.prepareMessages(messages)
+    → contextManager.prepareMessages(messages, context.systemPrompt)
       → count tokens: 1200 (under budget)
-      → returns { prepared: messages, dropped: 0 }
+      → returns { prepared: messages, dropped: 0, strategyName: "slidingWindow" }
     → convertToLlm(prepared)
     → streamFn → normal turn
     → tool results back, messages now has 15 items
     → next iteration:
-      → prepareMessages(messages)
-      → count: 10_500 (over budget: 10000)
+      → prepareMessages(messages, context.systemPrompt)
+      → count: 10_500 (over budget: 10000, accounting for system prompt)
       → strategy.apply() → drops oldest 2 pairs
       → count after trim: 9_200
       → emit context_trimmed event (includes strategyName: "slidingWindow")
@@ -524,7 +553,7 @@ User: new Agent({ model, tools }) // no contextManager
 - `slidingWindowStrategy` drops oldest non-system messages first
 - `slidingWindowStrategy` keeps at least one non-system message when possible
 - After over-budget trim, token count is below budget
-- `prepareMessages` returns `{ dropped: 0 }` when under budget
+- `prepareMessages` returns `{ dropped: 0, strategyName }` when under budget
 - `trimCount` increments only when trimming occurs
 - Custom strategy receives correct arguments
 - Empty message list returns empty prepared list with 0 token count

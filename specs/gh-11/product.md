@@ -27,7 +27,7 @@ The `Agent` class accumulates messages in its transcript without bound. There is
 
 - Exact tokenization matching each provider's tokenizer (approximation is sufficient)
 - Automatic summarization of dropped messages (strategy interface only; no built-in summarizer)
-- Image token counting (text-only for initial implementation)
+- Exact image token counting (coarse placeholder estimate is acceptable)
 - Pre-flight context estimation independent of actual LLM calls
 - Persisting token history across process restarts
 
@@ -76,6 +76,7 @@ Use the model's own context window as the budget:
 ```typescript
 const contextManager = new ContextManager({
   budget: model.contextWindow - model.maxTokens, // reserve space for output
+  strategy: slidingWindowStrategy,
 });
 ```
 
