@@ -260,7 +260,6 @@ async function loop(
       if (update.systemPrompt !== undefined) context.systemPrompt = update.systemPrompt;
     }
 
-    // Build the LLM context from persistent messages (with optional trim)
     let contextMessages = messages.slice();
 
     if (config.contextManager) {
@@ -279,14 +278,12 @@ async function loop(
       contextMessages = result.prepared;
     }
 
-    // Apply context transformation (existing hook)
-    // Note: transformContext is expected not to grow the context. If it does,
+    // transformContext is expected not to grow the context. If it does,
     // the result may exceed budget. Budget enforcement happens before this step.
     if (config.transformContext) {
       contextMessages = await config.transformContext(contextMessages, signal);
     }
 
-    // Convert agent messages to LLM messages
     const llmMessages = await config.convertToLlm(contextMessages);
     if (context.systemPrompt) {
       llmMessages.unshift({ role: "system", content: context.systemPrompt });

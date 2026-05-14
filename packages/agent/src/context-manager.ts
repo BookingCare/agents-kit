@@ -1,5 +1,11 @@
 import type { AgentMessage, ContextStrategy, TokenCounter } from "./types.js";
 
+/**
+ * Manages token budget and context trimming for agent messages.
+ *
+ * NOTE: This class is not thread-safe. Do not share instances across concurrent
+ * operations or modify state from multiple threads simultaneously.
+ */
 export class ContextManager implements TokenCounter {
   private _tokenCount = 0;
   private _trimCount = 0;
@@ -29,7 +35,15 @@ export class ContextManager implements TokenCounter {
 
   /**
    * Estimate token count for a single message.
-   * Naive approximation: characters / 4, rounded up.
+   *
+   * Uses a naive approximation: characters / 4, rounded up.
+   * This is generally accurate for English text but may be less accurate for:
+   * - Non-English languages (especially those with different character-to-token ratios)
+   * - Code-heavy content (programming languages have different tokenization patterns)
+   * - Content with many special characters or symbols
+   *
+   * For production use with specific models, consider integrating a proper tokenizer
+   * like GPT-3's tiktoken for more accurate token counting.
    */
   private estimateTokensForMessage(message: AgentMessage): number {
     let chars = 0;
@@ -129,7 +143,6 @@ export class ContextManager implements TokenCounter {
 export const slidingWindowStrategy: ContextStrategy = {
   name: "slidingWindow",
   apply(messages, budget, tokenCounter) {
-    // Separate system prompts
     const systemMessages = messages.filter(
       (m): m is Extract<AgentMessage, { role: "system" }> => m.role === "system",
     );
@@ -137,39 +150,33 @@ export const slidingWindowStrategy: ContextStrategy = {
       (m): m is Exclude<AgentMessage, { role: "system" }> => m.role !== "system",
     );
 
-    // Start with all messages
-    let kept = [...systemMessages, ...nonSystemMessages];
-    let dropIndex = 0;
-
-    // Drop oldest non-system messages one at a time until under budget
-    // or all non-system messages have been dropped.
-    // Complexity: O(n²) token counting due to re-counting from scratch each iteration.
-    while (tokenCounter.count(kept) > budget && dropIndex < nonSystemMessages.length) {
-      dropIndex++;
-      kept = [...systemMessages, ...nonSystemMessages.slice(dropIndex)];
+    const systemTokens = tokenCounter.count(systemMessages);
+    if (systemTokens > budget) {
+      return systemMessages.length > 0 ? [systemMessages[0]] : [];
     }
 
-    // If still over budget, progressively reduce to the minimal viable context
-    if (tokenCounter.count(kept) > budget) {
-      const systemOnlyTokens = tokenCounter.count(systemMessages);
-      if (systemOnlyTokens > budget) {
-        // System prompt alone exceeds budget — keep just the first system message
-        kept = systemMessages.length > 0 ? [systemMessages[0]] : [];
-      } else {
-        // Find the smallest suffix of non-system messages that still fits within budget,
-        // preferring recent messages.
-        let bestKept: AgentMessage[] = systemMessages;
-        for (let i = nonSystemMessages.length - 1; i >= 0; i--) {
-          const candidate = [...systemMessages, ...nonSystemMessages.slice(i)];
-          if (tokenCounter.count(candidate) <= budget) {
-            bestKept = candidate;
-            break;
-          }
-        }
-        kept = bestKept;
-      }
+    let currentTokens = systemTokens;
+    let keepFrom = nonSystemMessages.length;
+
+    for (let i = nonSystemMessages.length - 1; i >= 0; i--) {
+      const messageTokens = tokenCounter.count([nonSystemMessages[i]]);
+      if (currentTokens + messageTokens > budget) break;
+      currentTokens += messageTokens;
+      keepFrom = i;
     }
 
-    return kept;
+    let result = [...systemMessages, ...nonSystemMessages.slice(keepFrom)];
+
+    // If nothing fit and system alone is under budget, try keeping the most recent message
+    if (
+      keepFrom === nonSystemMessages.length &&
+      systemTokens < budget &&
+      nonSystemMessages.length > 0
+    ) {
+      const mostRecent = nonSystemMessages[nonSystemMessages.length - 1];
+      result = [...systemMessages, mostRecent];
+    }
+
+    return result;
   },
 };

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ContextManager, slidingWindowStrategy } from "../src/context-manager.js";
 import type { ContextStrategy, TokenCounter } from "../src/types.js";
-import type { Message } from "@bookingcare/ai";
+import type { AgentMessage } from "../src/types.js";
 
 describe("ContextManager", () => {
   describe("token estimation", () => {
@@ -11,7 +11,7 @@ describe("ContextManager", () => {
         strategy: slidingWindowStrategy,
       });
 
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System prompt" },
         { role: "user" as const, content: "Hello, world!", timestamp: Date.now() },
         { role: "user" as const, content: "Hi there!", timestamp: Date.now() },
@@ -28,7 +28,7 @@ describe("ContextManager", () => {
         strategy: slidingWindowStrategy,
       });
 
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         {
           role: "user" as const,
           content: [{ type: "text" as const, text: "Sample text" }],
@@ -46,7 +46,7 @@ describe("ContextManager", () => {
         strategy: slidingWindowStrategy,
       });
 
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         {
           role: "user" as const,
           content: [
@@ -92,7 +92,7 @@ describe("ContextManager", () => {
         strategy: slidingWindowStrategy,
       });
 
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "Hello", timestamp: Date.now() },
       ];
@@ -110,7 +110,7 @@ describe("ContextManager", () => {
 
       expect(contextManager.trimCount).toBe(0);
 
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "A".repeat(1000), timestamp: Date.now() },
         { role: "user" as const, content: "Response", timestamp: Date.now() },
@@ -139,7 +139,7 @@ describe("ContextManager", () => {
         strategy: slidingWindowStrategy,
       });
 
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "Hello", timestamp: Date.now() },
         { role: "user" as const, content: "Hi", timestamp: Date.now() },
@@ -158,7 +158,7 @@ describe("ContextManager", () => {
         strategy: slidingWindowStrategy,
       });
 
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "Hello", timestamp: Date.now() },
       ];
@@ -175,7 +175,7 @@ describe("ContextManager", () => {
         strategy: slidingWindowStrategy,
       });
 
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "A".repeat(1000), timestamp: Date.now() },
         { role: "user" as const, content: "Response", timestamp: Date.now() },
@@ -198,7 +198,7 @@ describe("ContextManager", () => {
 
       const systemPrompt =
         "You are a helpful assistant with a very long system prompt that consumes tokens.";
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "Hello", timestamp: Date.now() },
       ];
@@ -216,7 +216,7 @@ describe("ContextManager", () => {
         strategy: slidingWindowStrategy,
       });
 
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "Hello", timestamp: Date.now() },
       ];
@@ -231,14 +231,14 @@ describe("ContextManager", () => {
         strategy: slidingWindowStrategy,
       });
 
-      const shortMessages: Message[] = [
+      const shortMessages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "Hi", timestamp: Date.now() },
       ];
       contextManager.prepareMessages(shortMessages);
       expect(contextManager.trimCount).toBe(0);
 
-      const longMessages: Message[] = [
+      const longMessages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "A".repeat(10000), timestamp: Date.now() },
         { role: "user" as const, content: "Response", timestamp: Date.now() },
@@ -250,7 +250,7 @@ describe("ContextManager", () => {
 
   describe("custom strategy", () => {
     it("receives correct arguments", () => {
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "Hello", timestamp: Date.now() },
         { role: "user" as const, content: "Hi", timestamp: Date.now() },
@@ -288,7 +288,7 @@ describe("ContextManager", () => {
         strategy: keepOnlyFirstStrategy,
       });
 
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "First", timestamp: Date.now() },
         { role: "user" as const, content: "Response", timestamp: Date.now() },
@@ -304,7 +304,7 @@ describe("ContextManager", () => {
 describe("slidingWindowStrategy", () => {
   describe("system message preservation", () => {
     it("preserves all system messages", () => {
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System 1" },
         { role: "user" as const, content: "User 1", timestamp: Date.now() },
         { role: "user" as const, content: "Assistant 1", timestamp: Date.now() },
@@ -319,7 +319,7 @@ describe("slidingWindowStrategy", () => {
     });
 
     it("keeps system messages even when non-system are dropped", () => {
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System prompt" },
         { role: "user" as const, content: "A".repeat(10000), timestamp: Date.now() },
         { role: "user" as const, content: "Response", timestamp: Date.now() },
@@ -336,7 +336,7 @@ describe("slidingWindowStrategy", () => {
 
   describe("dropping oldest messages", () => {
     it("drops oldest non-system messages when over budget", () => {
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "User 1", timestamp: Date.now() },
         { role: "user" as const, content: "Assistant 1", timestamp: Date.now() },
@@ -359,7 +359,7 @@ describe("slidingWindowStrategy", () => {
     });
 
     it("drops from the beginning (oldest)", () => {
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "user" as const, content: "First", timestamp: Date.now() },
         { role: "user" as const, content: "First response", timestamp: Date.now() },
         { role: "user" as const, content: "Second", timestamp: Date.now() },
@@ -376,7 +376,7 @@ describe("slidingWindowStrategy", () => {
 
   describe("keeping at least one message", () => {
     it("keeps at least one non-system message when possible", () => {
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "User", timestamp: Date.now() },
         { role: "user" as const, content: "Assistant", timestamp: Date.now() },
@@ -390,7 +390,7 @@ describe("slidingWindowStrategy", () => {
     });
 
     it("drops all non-system if even one exceeds budget", () => {
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System" },
         { role: "user" as const, content: "A".repeat(10000), timestamp: Date.now() },
       ];
@@ -404,7 +404,7 @@ describe("slidingWindowStrategy", () => {
 
   describe("budget compliance", () => {
     it("returns messages under budget", () => {
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "user" as const, content: "A".repeat(1000), timestamp: Date.now() },
         { role: "user" as const, content: "Response", timestamp: Date.now() },
         { role: "user" as const, content: "B".repeat(1000), timestamp: Date.now() },
@@ -421,7 +421,7 @@ describe("slidingWindowStrategy", () => {
 
   describe("edge cases", () => {
     it("handles empty message list", () => {
-      const messages: Message[] = [];
+      const messages: AgentMessage[] = [];
       const tokenCounter: TokenCounter = { count: () => 0 };
       const result = slidingWindowStrategy.apply(messages, 100, tokenCounter);
 
@@ -429,7 +429,7 @@ describe("slidingWindowStrategy", () => {
     });
 
     it("handles only system messages", () => {
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "System 1" },
         { role: "system" as const, content: "System 2" },
       ];
@@ -441,7 +441,7 @@ describe("slidingWindowStrategy", () => {
     });
 
     it("handles system prompt exceeding budget alone", () => {
-      const messages: Message[] = [
+      const messages: AgentMessage[] = [
         { role: "system" as const, content: "A".repeat(10000) },
         { role: "user" as const, content: "User", timestamp: Date.now() },
       ];
