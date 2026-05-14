@@ -50,6 +50,35 @@ When closing issues via commit:
 - Include `fixes #<number>` or `closes #<number>` in the commit message
 - This automatically closes the issue when the commit is merged
 
+## Spec-Driven Implementation Workflow
+
+When working on features that have product/tech specs, follow this lifecycle:
+
+### Workflow Sequence
+
+1. **Issue Opening** → Issue created with feature request
+2. **Spec Creation** → Product spec (and tech spec if needed) created in `specs/`
+3. **Spec Review** → Spec PR opened for review
+4. **Spec Approval** → Spec merged, issue labeled `ready to implement`
+5. **Implementation** → Implementation PR opened (issue **remains open**)
+6. **Implementation Review** → Implementation reviewed and adjusted
+7. **Implementation Merge** → Implementation merged into main
+8. **Issue Closure** → Issue closed via `fixes #N` or `closes #N` in commit message
+
+### Key Points
+
+- **NEVER close the issue after spec approval** — the issue tracks implementation status
+- **Label change, not issue closure** — When spec is approved, change issue label to `ready to implement`
+- **Implementation PR targets feature branch** — Work on feature branch until user approves, then merge to main
+- **Close issue via commit message** — The final implementation merge commit must include `fixes #N` or `closes #N`
+
+### When to Use This Workflow
+
+- Significant user-facing features
+- Architecture changes
+- Features requiring product and technical specification
+- Any feature where the user explicitly requests a spec-first approach
+
 ## PR Workflow
 
 - Analyze PRs without pulling locally first
