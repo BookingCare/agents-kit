@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `ContextManager` now uses actual `usage.input` from assistant messages instead of estimating all tokens (more accurate for assistant messages)
+
 ### Added
 
 - Optional `store` parameter on `Agent` — accepts a `@bookingcare/db` `Store` for automatic session persistence
