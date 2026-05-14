@@ -291,7 +291,10 @@ export const streamAzureOpenAICompletions: StreamFunction<
             usage.cacheRead += chunk.usage.prompt_tokens_details.cached_tokens;
           }
           // Azure OpenAI doesn't provide cache_write_tokens, assume 0 for now
-          usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+          // Use total_tokens from API to avoid double-counting cached tokens
+          // Note: Azure's total_tokens includes both prompt and completion tokens
+          // but doesn't include cache_write_tokens, so we add cacheWrite separately
+          usage.totalTokens = (chunk.usage.total_tokens ?? 0) + usage.cacheWrite;
         }
 
         if (choice?.finish_reason) {

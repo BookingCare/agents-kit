@@ -48,8 +48,9 @@ export class ContextManager implements TokenCounter {
    */
   private getTokensForMessage(message: AgentMessage): number {
     // Assistant messages have actual usage data from when they were generated
+    // For context window management, count total input tokens including cached tokens
     if (message.role === "assistant" && "usage" in message) {
-      return message.usage.input;
+      return message.usage.input + message.usage.cacheRead;
     }
 
     // For messages without usage (system, user, toolResult), estimate
