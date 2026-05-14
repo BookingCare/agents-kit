@@ -1,5 +1,5 @@
 import type { AgentMessage, ContextStrategy, TokenCounter } from "./types.js";
-import type { ToolCall } from "@bookingcare/ai";
+import type { ToolCall, Usage } from "@bookingcare/ai";
 
 /**
  * Manages token budget and context trimming for agent messages.
@@ -35,18 +35,24 @@ export class ContextManager implements TokenCounter {
   }
 
   /**
-   * Estimate token count for a single message.
+   * Get token count for a single message.
    *
-   * Uses a naive approximation: characters / 4, rounded up.
-   * This is generally accurate for English text but may be less accurate for:
+   * For assistant messages with actual usage data, uses the recorded input tokens.
+   * For other message types (system, user, toolResult), estimates via character count.
+   *
+   * Estimation uses characters / 4, rounded up. This is generally accurate for
+   * English text but may be less accurate for:
    * - Non-English languages (especially those with different character-to-token ratios)
    * - Code-heavy content (programming languages have different tokenization patterns)
    * - Content with many special characters or symbols
-   *
-   * For production use with specific models, consider integrating a proper tokenizer
-   * like GPT-3's tiktoken for more accurate token counting.
    */
-  private estimateTokensForMessage(message: AgentMessage): number {
+  private getTokensForMessage(message: AgentMessage): number {
+    // Assistant messages have actual usage data from when they were generated
+    if (message.role === "assistant" && "usage" in message) {
+      return message.usage.input;
+    }
+
+    // For messages without usage (system, user, toolResult), estimate
     let chars = 0;
     if (typeof message.content === "string") {
       chars = message.content.length;
@@ -84,7 +90,7 @@ export class ContextManager implements TokenCounter {
   }
 
   count(messages: AgentMessage[]): number {
-    return messages.reduce((sum, m) => sum + this.estimateTokensForMessage(m), 0);
+    return messages.reduce((sum, m) => sum + this.getTokensForMessage(m), 0);
   }
 
   /**
