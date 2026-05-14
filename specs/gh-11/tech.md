@@ -13,25 +13,25 @@ The agent loop accumulates `messages` without limit. Before each LLM call, there
 
 ### packages/agent/src/types.ts
 
-- `AgentMessage` (line ~111): Alias for `Message` from `@bookingcare/ai` — has `role`, `content`, optional `timestamp`
-- `AgentContext` (line ~125): `{ systemPrompt: string; messages: AgentMessage[]; tools: AgentTool[] }`
-- `AgentLoopConfig` (line ~86-112): Loop configuration including `convertToLlm`, `transformContext`, `maxTokens`
-- `AgentEvent` (line ~117-126): Current events — need to add `context_trimmed`
+- `AgentMessage` (line ~148): Alias for `Message` from `@bookingcare/ai` — has `role`, `content`, optional `timestamp`
+- `AgentContext` (line ~178): `{ systemPrompt: string; messages: AgentMessage[]; tools: AgentTool[] }`
+- `AgentLoopConfig` (line ~81): Loop configuration including `convertToLlm`, `transformContext`, `maxTokens`
+- `AgentEvent` (line ~169): Current events — need to add `context_trimmed`
 
 ### packages/agent/src/agent-loop.ts
 
-- `loop()` (line ~140-230): Core loop that builds `llmMessages` and calls `streamFn()`
-- Line ~172-178: `llmMessages` assembly — `messages` are converted via `convertToLlm` and system prompt is prepended
-- Line ~180: `streamFn(config.model, { messages: llmMessages, tools }, options)` — the actual LLM call
-- `executeToolCalls()` (line ~315-420): Appends tool result messages to `messages`
-- `transformContext` (line ~90 in AgentLoopConfig): Optional context transformation hook existing on AgentLoopConfig
+- `loop()` (line ~234): Core loop that builds `llmMessages` and calls `streamFn()`
+- Line ~264: `llmMessages` assembly — `messages` are converted via `convertToLlm` and system prompt is prepended
+- Line ~288: `streamFn(config.model, { messages: llmMessages, tools }, options)` — the actual LLM call
+- `executeToolCalls()`: Appends tool result messages to `messages`
+- `transformContext` (line ~102 in AgentLoopConfig): Optional context transformation hook existing on AgentLoopConfig
 
 ### packages/agent/src/agent.ts
 
 - `Agent` class (line ~185-end): Main class
-- `subscribe()` (line ~225-240): Event listener registration — will need to emit new `context_trimmed` event
-- `processEvents` (line ~470-530): Event type handling — add `context_trimmed` case
-- `createContextSnapshot()` (line ~360-365): Builds `AgentContext` from current state
+- `subscribe()` (line ~338): Event listener registration — will need to emit new `context_trimmed` event
+- `processEvents` (line ~627): Event type handling — add `context_trimmed` case
+- `createContextSnapshot()` (line ~526): Builds `AgentContext` from current state
 
 ### packages/ai/src/types.ts
 
@@ -80,6 +80,7 @@ export interface ContextTrimmedEvent {
   budget: number;
   tokenCountBefore: number;
   tokenCountAfter: number;
+  strategyName: string;
 }
 ```
 
@@ -87,7 +88,7 @@ Update `AgentEvent` union to include `ContextTrimmedEvent`.
 
 ### Config (packages/agent/src/types.ts)
 
-No changes to `AgentLoopConfig` needed. The context manager operates inside `transformContext` or as a pre-flight step in the loop.
+Add `contextManager` to `AgentLoopConfig` so the loop can access it during each iteration.
 
 ### ContextManager class (packages/agent/src/context-manager.ts)
 
@@ -151,6 +152,8 @@ export class ContextManager implements TokenCounter {
    * Analyze messages and trim if over budget.
    * Returns the message list to send to the LLM.
    * Also returns metadata about what was trimmed.
+   *
+   * `tokenCount` reflects the prepared (trimmed) message list.
    */
   prepareMessages(messages: AgentMessage[]): {
     prepared: AgentMessage[];
@@ -159,9 +162,9 @@ export class ContextManager implements TokenCounter {
     tokenCountAfter: number;
   } {
     const tokenCountBefore = this.count(messages);
-    this._tokenCount = tokenCountBefore;
 
     if (tokenCountBefore <= this.options.budget) {
+      this._tokenCount = tokenCountBefore;
       return {
         prepared: messages,
         dropped: 0,
@@ -196,28 +199,34 @@ export const slidingWindowStrategy: ContextStrategy = {
 
     // Start with all messages
     let kept = [...systemMessages, ...nonSystemMessages];
-
-    // Drop oldest non-system messages first
     let dropIndex = 0;
-    while (tokenCounter.count(kept) > budget && dropIndex < nonSystemMessages.length - 2) {
-      kept = [...systemMessages, ...nonSystemMessages.slice(dropIndex + 1)];
+
+    // Drop oldest non-system messages one at a time until under budget
+    // or all non-system messages have been dropped.
+    // Complexity: O(n²) token counting due to re-counting from scratch each iteration.
+    while (tokenCounter.count(kept) > budget && dropIndex < nonSystemMessages.length) {
       dropIndex++;
+      kept = [...systemMessages, ...nonSystemMessages.slice(dropIndex)];
     }
 
-    // If still over budget and system messages are the issue, keep minimal system
+    // If still over budget, progressively reduce to the minimal viable context
     if (tokenCounter.count(kept) > budget) {
-      const systemTokens = tokenCounter.count(systemMessages);
-      if (systemTokens > budget) {
-        // Keep just the first system message (truncated would need summarizer — not in scope)
-        kept = systemMessages.length > 0 ? [systemMessages[0]] : kept.slice(-1);
+      const systemOnlyTokens = tokenCounter.count(systemMessages);
+      if (systemOnlyTokens > budget) {
+        // System prompt alone exceeds budget — keep just the first system message
+        kept = systemMessages.length > 0 ? [systemMessages[0]] : [];
       } else {
-        // Drop everything except system + most recent message
-        const lastNonSystem = nonSystemMessages.at(-1);
-        kept = lastNonSystem
-          ? [...systemMessages, lastNonSystem]
-          : systemMessages.length > 0
-            ? systemMessages
-            : kept.slice(-1);
+        // Find the smallest suffix of non-system messages that still fits within budget,
+        // preferring recent messages.
+        let bestKept = systemMessages;
+        for (let i = nonSystemMessages.length - 1; i >= 0; i--) {
+          const candidate = [...systemMessages, ...nonSystemMessages.slice(i)];
+          if (tokenCounter.count(candidate) <= budget) {
+            bestKept = candidate;
+            break;
+          }
+        }
+        kept = bestKept;
       }
     }
 
@@ -309,12 +318,15 @@ async function loop(
           budget: config.contextManager.budget,
           tokenCountBefore: result.tokenCountBefore,
           tokenCountAfter: result.tokenCountAfter,
+          strategyName: config.contextManager.options.strategy.name,
         });
       }
       contextMessages = result.prepared;
     }
 
     // Apply context transformation (existing hook)
+    // Note: transformContext is expected not to grow the context. If it does,
+    // the result may exceed budget. Budget enforcement happens before this step.
     if (config.transformContext) {
       contextMessages = await config.transformContext(contextMessages, signal);
     }
@@ -454,7 +466,7 @@ User: agent.prompt("Long running task")
       → count: 10_500 (over budget: 10000)
       → strategy.apply() → drops oldest 2 pairs
       → count after trim: 9_200
-      → emit context_trimmed event
+      → emit context_trimmed event (includes strategyName: "slidingWindow")
       → prepared messages sent to LLM
     → loop continues
   }
@@ -482,13 +494,13 @@ User: new Agent({ model, tools }) // no contextManager
 
 **Problem**: Naive character-count / 4 approximation differs from provider tokenizers (e.g., GPT-4 uses tiktoken, Claude uses its own tokenizer).
 
-**Mitigation**: Document that estimation is approximate and conservative. The budget should be set with margin (e.g., use `model.contextWindow * 0.9` instead of exact context window). The strategy can further reduce context if the first trim still exceeds budget (mitigated by the capped retrim logic).
+**Mitigation**: Document that estimation is approximate and conservative. The budget should be set with margin (e.g., use `model.contextWindow * 0.9` instead of exact context window). The built-in `slidingWindowStrategy` includes a fallback that progressively reduces to system-prompt-only when needed.
 
-### Risk 3: Infinite trim loop
+### Risk 3: Strategy fails to reduce below budget
 
-**Problem**: A custom strategy that never actually reduces tokens below budget could cause an infinite loop.
+**Problem**: A custom strategy may return a message list that still exceeds budget.
 
-**Mitigation**: Cap the trim-and-verify loop at 3 iterations. After 3 attempts, emit a warning and proceed with the reduced context anyway. The LLM provider will then return an error if still over budget.
+**Mitigation**: The strategy is the sole authority for trimming. The built-in `slidingWindowStrategy` includes a fallback path that reduces to system-prompt-only if needed. Custom strategies should document their budget-compliance guarantees. The LLM provider will return an error if the final context still exceeds its actual limit.
 
 ### Risk 4: Context transformation order
 

@@ -14,7 +14,7 @@ The `Agent` class accumulates messages in its transcript without bound. There is
 
 ## Goals
 
-1. Track cumulative token usage per session across all LLM calls
+1. Track estimated token usage for each LLM call against a configurable per-call budget
 2. Estimate per-message token counts (approximation acceptable) before each call
 3. Automatically trim message history when estimated tokens exceed budget
 4. Expose `ContextManager.tokenCount` and `ContextManager.remainingBudget`
@@ -158,15 +158,15 @@ The built-in `slidingWindowStrategy` behaves as follows:
 ### Events and debugging
 
 14. `context_trimmed` event is emitted with `droppedMessages: number`
-15. `contextManager.tokenCount` reflects messages _before_ trimming
+15. `contextManager.tokenCount` reflects messages _after_ the most recent trim operation (i.e., the count of messages that will be sent to the LLM)
 
 ### Edge cases
 
-16. Single message exceeding budget: trimmed to empty (except system prompt), LLM call goes ahead with just system prompt
-17. System prompt itself exceeds budget: trimmed to just system prompt, emits warning
+16. Single non-system message exceeding budget: trimmed to system prompt only, LLM call goes ahead with just system prompt
+17. System prompt exceeds budget on its own: kept as the sole message in the context (the strategy may truncate, but exact summarization is out of scope)
 18. Empty messages array: no trimming needed, token count is 0
 19. Budget === token count exactly: no trimming
-20. After a trim, the LLM call still exceeds budget: trim again (capped at 3 iterations to prevent infinite loop)
+20. After a trim, the token count still exceeds budget: strategy is responsible for reducing to the minimal viable context (system prompt only if necessary)
 
 ## Validation
 
@@ -185,7 +185,6 @@ Add `context-manager.test.ts`:
 - Messages removed from LLM context remain in `agent.state.messages`
 - No trim when messages are under budget
 - System prompt exceeding budget results in system-prompt-only context
-- Trim loop capped at 3 iterations for pathological cases
 
 ### Integration tests (agents/test/)
 
@@ -216,4 +215,4 @@ Add `context-manager.test.ts`:
 
 3. **Per-message metadata**: Should we attach `estimatedTokens` metadata to each message for debugging? This adds a field to `AgentMessage` that doesn't exist today.
 
-4. **Budget per turn vs per session**: Should `budget` refer to total accumulated tokens (sum of all API calls), or a per-call budget? The current design implies per-call.
+4. **Budget model**: The budget is per-call (per LLM request), not cumulative across the session. This aligns with the `prepareMessages` design where the strategy trims the current context before each turn.
