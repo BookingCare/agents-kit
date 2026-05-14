@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `ToolCall.arguments` type changed from `string` to `Record<string, any>`. Providers now receive and emit parsed argument objects instead of JSON-encoded strings.
+- `ToolCall` now requires a `type: "toolCall"` discriminator field. All tool call objects must include this property.
+
+### Added
+
+- `Context.systemPrompt?: string` — optional system prompt that is automatically prepended as a system message when building provider request parameters.
+
+### Changed
+
+- `Usage` interface restructured: renamed fields (`inputTokens`→`input`, `outputTokens`→`output`), added `cacheRead`, `cacheWrite`, `totalTokens`, and embedded `cost` object
+- Removed standalone `Cost` interface - cost is now accessed via `usage.cost`
+- `StreamResult` no longer has a top-level `cost` field (use `result.usage.cost` instead)
+- `calculateCost()` now returns `Usage["cost"]` type with cache cost fields
+
 ## [0.2.0] - 2026-05-13
 
 ### Breaking Changes

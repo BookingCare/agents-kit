@@ -10,6 +10,7 @@ import {
   type TextContent,
   type Tool,
   type Transport,
+  type Usage,
 } from "@bookingcare/ai";
 import type { Store, AgentInfo } from "@bookingcare/db";
 import { NotFoundError, serializeAgentState, createTodoSnapshot } from "@bookingcare/db";
@@ -32,6 +33,7 @@ import type {
   StreamingAssistantMessage,
   ToolExecutionMode,
 } from "./types.js";
+import type { ContextManager } from "./context-manager.js";
 
 function defaultConvertToLlm(messages: AgentMessage[]): Message[] {
   return messages.filter(
@@ -40,9 +42,13 @@ function defaultConvertToLlm(messages: AgentMessage[]): Message[] {
   ) as Message[];
 }
 
-const EMPTY_USAGE = {
-  inputTokens: 0,
-  outputTokens: 0,
+const EMPTY_USAGE: Usage = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
 const DEFAULT_MODEL = {
@@ -131,6 +137,8 @@ export interface AgentOptions {
   store?: Store;
   /** Optional todo manager for persisting todo state. */
   todoManager?: TodoManager;
+  /** Optional context manager for token budget management. */
+  contextManager?: ContextManager;
 }
 
 class PendingMessageQueue {
@@ -218,6 +226,8 @@ export class Agent {
   private store?: Store;
   private todoManager?: TodoManager;
   private createdAt?: number;
+  /** Optional context manager for token budget management. */
+  public contextManager?: ContextManager;
 
   constructor(options: AgentOptions = {}) {
     this._state = createMutableAgentState(options.initialState);
@@ -239,6 +249,7 @@ export class Agent {
     this.transport = options.transport ?? "auto";
     this.maxRetryDelayMs = options.maxRetryDelayMs;
     this.toolExecution = options.toolExecution ?? "parallel";
+    this.contextManager = options.contextManager;
   }
 
   /**
@@ -557,6 +568,7 @@ export class Agent {
         return this.steeringQueue.drain();
       },
       getFollowUpMessages: async () => this.followUpQueue.drain(),
+      contextManager: this.contextManager,
     };
   }
 
@@ -674,6 +686,10 @@ export class Agent {
             `[agent] persistence failed: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
+        break;
+
+      case "context_trimmed":
+        // No internal state change needed; event is forwarded to listeners
         break;
     }
 

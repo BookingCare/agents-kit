@@ -8,6 +8,7 @@ import type {
   StreamResult,
   Tool,
   ToolCall,
+  Usage,
 } from "@bookingcare/ai";
 import { streamSimple, Type } from "@bookingcare/ai";
 import { createToolDispatch } from "./tools.js";
@@ -122,8 +123,16 @@ export async function agentLoop(query: string, options: AgentLoopOptions) {
           const result: StreamResult = {
             text: textParts.join(""),
             toolCalls,
-            usage: msg.usage ?? { inputTokens: 0, outputTokens: 0 },
-            cost: undefined,
+            usage:
+              msg.usage ??
+              ({
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 0,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              } as Usage),
             stopReason: (msg.stopReason as StreamResult["stopReason"]) ?? "stop",
           };
           onStreamResult(result, iterations);
@@ -260,8 +269,31 @@ async function loop(
       if (update.systemPrompt !== undefined) context.systemPrompt = update.systemPrompt;
     }
 
-    // Convert agent messages to LLM messages
-    const llmMessages = await config.convertToLlm(messages);
+    let contextMessages = messages.slice();
+
+    if (config.contextManager) {
+      const result = config.contextManager.prepareMessages(contextMessages, context.systemPrompt);
+      if (result.dropped > 0) {
+        await emit({
+          type: "context_trimmed",
+          droppedMessages: result.dropped,
+          remainingMessages: result.prepared.length,
+          budget: config.contextManager.budget,
+          tokenCountBefore: result.tokenCountBefore,
+          tokenCountAfter: result.tokenCountAfter,
+          strategyName: result.strategyName,
+        });
+      }
+      contextMessages = result.prepared;
+    }
+
+    // transformContext is expected not to grow the context. If it does,
+    // the result may exceed budget. Budget enforcement happens before this step.
+    if (config.transformContext) {
+      contextMessages = await config.transformContext(contextMessages, signal);
+    }
+
+    const llmMessages = await config.convertToLlm(contextMessages);
     if (context.systemPrompt) {
       llmMessages.unshift({ role: "system", content: context.systemPrompt });
     }
@@ -371,12 +403,7 @@ async function loop(
 interface StreamCollectResult {
   text: string;
   toolCalls: ToolCall[];
-  usage: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheCreationTokens?: number;
-    cacheReadTokens?: number;
-  };
+  usage: Usage;
   stopReason: StopReason;
   errorMessage?: string;
 }
@@ -388,7 +415,14 @@ async function collectStreamIntoMessage(
 ): Promise<StreamCollectResult | null> {
   let text = "";
   const toolCallParts = new Map<number, ToolCall>();
-  let usage = { inputTokens: 0, outputTokens: 0 };
+  let usage: Usage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
   let stopReason: StopReason = "unknown";
   let errorMessage: string | undefined;
 
@@ -419,11 +453,17 @@ async function collectStreamIntoMessage(
         if (toolCallParts.size >= MAX_TOOL_CALLS) {
           throw new Error(`Too many tool calls (max ${MAX_TOOL_CALLS})`);
         }
-        toolCallParts.set(event.contentIndex, { id: "", name: "", arguments: "" });
+        toolCallParts.set(event.contentIndex, {
+          type: "toolCall",
+          id: "",
+          name: "",
+          arguments: {},
+        });
         break;
 
       case "toolcall_delta":
-        toolCallParts.get(event.contentIndex)!.arguments += event.delta;
+        // Note: toolcall_delta with object arguments requires provider-side handling
+        // This is a no-op for now since providers handle argument parsing
         break;
 
       case "toolcall_end":
@@ -433,14 +473,12 @@ async function collectStreamIntoMessage(
       case "done":
         stopReason = event.reason;
         usage = {
-          inputTokens: event.message.usage.inputTokens,
-          outputTokens: event.message.usage.outputTokens,
-          ...(event.message.usage.cacheCreationTokens != null && {
-            cacheCreationTokens: event.message.usage.cacheCreationTokens,
-          }),
-          ...(event.message.usage.cacheReadTokens != null && {
-            cacheReadTokens: event.message.usage.cacheReadTokens,
-          }),
+          input: event.message.usage.input,
+          output: event.message.usage.output,
+          cacheRead: event.message.usage.cacheRead,
+          cacheWrite: event.message.usage.cacheWrite,
+          totalTokens: event.message.usage.totalTokens,
+          cost: { ...event.message.usage.cost },
         };
         break;
 
@@ -448,8 +486,12 @@ async function collectStreamIntoMessage(
         stopReason = event.reason;
         errorMessage = event.error.errorMessage;
         usage = {
-          inputTokens: event.error.usage.inputTokens,
-          outputTokens: event.error.usage.outputTokens,
+          input: event.error.usage.input,
+          output: event.error.usage.output,
+          cacheRead: event.error.usage.cacheRead,
+          cacheWrite: event.error.usage.cacheWrite,
+          totalTokens: event.error.usage.totalTokens,
+          cost: { ...event.error.usage.cost },
         };
         break;
     }
@@ -475,19 +517,7 @@ async function executeToolCalls(
   const toolMap = new Map(tools.map((t) => [t.name, t] as [string, AgentTool]));
 
   const execute = async (toolCall: ToolCall): Promise<AgentMessage> => {
-    let args: Record<string, unknown>;
-    try {
-      args = JSON.parse(toolCall.arguments) as Record<string, unknown>;
-    } catch (e) {
-      return {
-        role: "toolResult",
-        toolCallId: toolCall.id,
-        toolName: toolCall.name,
-        content: [{ type: "text" as const, text: `Error: ${(e as Error).message}` }],
-        isError: true,
-        timestamp: Date.now(),
-      };
-    }
+    let args = toolCall.arguments as Record<string, unknown>;
     // Resolve tool, prepare arguments, execute
     const toolDef = toolMap.get(toolCall.name);
 

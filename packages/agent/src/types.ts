@@ -14,6 +14,28 @@ import type {
 } from "@bookingcare/ai";
 import type { SkillLoader } from "./skill-loader.js";
 import type { TodoManager } from "./todo-manager.js";
+import type { ContextManager } from "./context-manager.js";
+
+// --- Context management ---
+
+export interface ContextStrategy {
+  name: string;
+  apply(messages: AgentMessage[], budget: number, tokenCounter: TokenCounter): AgentMessage[];
+}
+
+export interface TokenCounter {
+  count(messages: AgentMessage[]): number;
+}
+
+export interface ContextTrimmedEvent {
+  type: "context_trimmed";
+  droppedMessages: number;
+  remainingMessages: number;
+  budget: number;
+  tokenCountBefore: number;
+  tokenCountAfter: number;
+  strategyName: string;
+}
 
 // --- Agent loop ---
 
@@ -103,6 +125,7 @@ export interface AgentLoopConfig {
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   getSteeringMessages: () => Promise<AgentMessage[]>;
   getFollowUpMessages: () => Promise<AgentMessage[]>;
+  contextManager?: ContextManager;
 }
 
 // --- Agent tool execution ---
@@ -173,7 +196,8 @@ export type AgentEvent =
   | { type: "tool_execution_start"; toolCallId: string }
   | { type: "tool_execution_end"; toolCallId: string }
   | { type: "turn_end"; message: AgentMessage; toolResults: AgentMessage[] }
-  | { type: "agent_end"; messages: AgentMessage[] };
+  | { type: "agent_end"; messages: AgentMessage[] }
+  | ContextTrimmedEvent;
 
 export interface AgentContext {
   systemPrompt: string;

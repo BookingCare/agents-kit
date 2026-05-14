@@ -35,7 +35,6 @@ export type {
   StreamFunction,
   SimpleStreamOptions,
   Usage,
-  Cost,
   StreamResult,
   ToolDefinition,
 } from "./types.js";
