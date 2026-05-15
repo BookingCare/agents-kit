@@ -19,6 +19,9 @@ export type {
   AgentState,
   AgentEvent,
   AgentContext,
+  BreakpointStage,
+  BreakpointCondition,
+  BreakpointHit,
   QueueMode,
   ContextStrategy,
   TokenCounter,
@@ -39,4 +42,5 @@ export { TodoManager } from "./todo-manager.js";
 export type { TodoItem } from "./todo-manager.js";
 export { Agent } from "./agent.js";
 export type { AgentOptions } from "./agent.js";
+export { BreakpointManager } from "./breakpoint-manager.js";
 export { ContextManager, slidingWindowStrategy } from "./context-manager.js";

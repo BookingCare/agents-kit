@@ -15,6 +15,7 @@ import {
 import type { Store, AgentInfo } from "@bookingcare/db";
 import { NotFoundError, serializeAgentState, createTodoSnapshot } from "@bookingcare/db";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.js";
+import { BreakpointManager } from "./breakpoint-manager.js";
 import type { TodoManager } from "./todo-manager.js";
 import type {
   AfterToolCallContext,
@@ -28,6 +29,9 @@ import type {
   AgentTool,
   BeforeToolCallContext,
   BeforeToolCallResult,
+  BreakpointCondition,
+  BreakpointHit,
+  BreakpointStage,
   QueueMode,
   StreamFn,
   StreamingAssistantMessage,
@@ -139,6 +143,8 @@ export interface AgentOptions {
   todoManager?: TodoManager;
   /** Optional context manager for token budget management. */
   contextManager?: ContextManager;
+  /** Optional breakpoint manager for pause/resume control. */
+  breakpointManager?: BreakpointManager;
 }
 
 class PendingMessageQueue {
@@ -194,6 +200,9 @@ export class Agent {
   private readonly steeringQueue: PendingMessageQueue;
   private readonly followUpQueue: PendingMessageQueue;
 
+  public breakpointManager: BreakpointManager;
+  public onBreakpoint?: (hit: BreakpointHit) => Promise<void> | void;
+
   public convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
   public transformContext?: (
     messages: AgentMessage[],
@@ -242,6 +251,7 @@ export class Agent {
     this.prepareNextTurn = options.prepareNextTurn;
     this.steeringQueue = new PendingMessageQueue(options.steeringMode ?? "one-at-a-time");
     this.followUpQueue = new PendingMessageQueue(options.followUpMode ?? "one-at-a-time");
+    this.breakpointManager = options.breakpointManager ?? new BreakpointManager();
     this.store = options.store;
     this.todoManager = options.todoManager;
     this.sessionId = options.sessionId ?? (options.store ? randomUUID() : undefined);
@@ -406,6 +416,26 @@ export class Agent {
     this.clearFollowUpQueue();
   }
 
+  setBreakpoint(stage: BreakpointStage, condition?: BreakpointCondition): void {
+    this.breakpointManager.setBreakpoint(stage, condition);
+  }
+
+  clearBreakpoint(stage: BreakpointStage): void {
+    this.breakpointManager.clearBreakpoint(stage);
+  }
+
+  clearAllBreakpoints(): void {
+    this.breakpointManager.clearAllBreakpoints();
+  }
+
+  pause(): void {
+    this.breakpointManager.pause();
+  }
+
+  resume(): void {
+    this.breakpointManager.resume();
+  }
+
   /** Returns true when either queue still contains pending messages. */
   hasQueuedMessages(): boolean {
     return this.steeringQueue.hasItems() || this.followUpQueue.hasItems();
@@ -542,6 +572,34 @@ export class Agent {
     };
   }
 
+  private createStateSnapshot(): AgentState {
+    const model = this._state.model;
+    const compat = model.compat
+      ? {
+          ...model.compat,
+          ...(model.compat.headers ? { headers: { ...model.compat.headers } } : {}),
+        }
+      : undefined;
+
+    return {
+      ...this._state,
+      model: {
+        ...model,
+        input: [...model.input],
+        cost: { ...model.cost },
+        ...(model.headers ? { headers: { ...model.headers } } : {}),
+        ...(model.thinkingLevelMap ? { thinkingLevelMap: { ...model.thinkingLevelMap } } : {}),
+        ...(compat ? { compat } : {}),
+      },
+      tools: this._state.tools.map((tool) => ({ ...tool })),
+      messages: structuredClone(this._state.messages),
+      pendingToolCalls: new Set(this._state.pendingToolCalls),
+      streamingMessage: this._state.streamingMessage
+        ? structuredClone(this._state.streamingMessage)
+        : undefined,
+    };
+  }
+
   private createLoopConfig(options: { skipInitialSteeringPoll?: boolean } = {}): AgentLoopConfig {
     let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
     return {
@@ -552,6 +610,63 @@ export class Agent {
       transport: this.transport,
       maxRetryDelayMs: this.maxRetryDelayMs,
       toolExecution: this.toolExecution,
+      beforeStage: async (stage, context) => {
+        const manager = this.breakpointManager;
+        const shouldPause = manager.isPaused() || manager.shouldPauseAt(stage, context);
+        if (!shouldPause) {
+          return;
+        }
+
+        if (!manager.isPaused()) {
+          manager.pause();
+        }
+
+        const hit: BreakpointHit = {
+          stage,
+          context,
+          snapshot: this.createStateSnapshot(),
+        };
+
+        try {
+          await this.onBreakpoint?.(hit);
+        } catch (error) {
+          manager.resume();
+          throw error;
+        }
+
+        const resumeWait = manager.resumeWait;
+        if (!resumeWait) {
+          return;
+        }
+
+        const abortSignal = this.signal;
+        if (abortSignal?.aborted) {
+          manager.resume();
+          return;
+        }
+
+        let removeAbortListener = () => {};
+        const abortWait = abortSignal
+          ? new Promise<void>((resolve) => {
+              const onAbort = () => {
+                abortSignal.removeEventListener("abort", onAbort);
+                resolve();
+              };
+              removeAbortListener = () => abortSignal.removeEventListener("abort", onAbort);
+              abortSignal.addEventListener("abort", onAbort, { once: true });
+            })
+          : Promise.resolve();
+
+        try {
+          await Promise.race([resumeWait, abortWait]);
+        } finally {
+          removeAbortListener();
+        }
+
+        if (abortSignal?.aborted) {
+          manager.resume();
+        }
+      },
       beforeToolCall: this.beforeToolCall,
       afterToolCall: this.afterToolCall,
       prepareNextTurn: this.prepareNextTurn
