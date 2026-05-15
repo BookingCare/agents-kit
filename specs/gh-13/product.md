@@ -2,7 +2,7 @@
 
 ## Summary
 
-Replace the ad-hoc `beforeToolCall` hook pattern with a centralized, rule-based `PermissionManager`. This provides JSON-serializable permission rules for agent tools with allow / deny / ask semantics, and enables UI-friendly approval flows.
+Add a centralized, rule-based `PermissionManager` alongside the existing `beforeToolCall` hook. This provides JSON-serializable permission rules for agent tools with allow / deny / ask semantics, and enables UI-friendly approval flows.
 
 ## Problem
 
@@ -115,7 +115,7 @@ agent.subscribe(async (event) => {
 });
 ```
 
-If no listener resolves the event, the tool call stays pending until a listener responds or the agent run is aborted.
+If no listener resolves the event, the tool call stays pending until a listener responds or the agent run is aborted; there is no timeout-based auto-deny.
 
 ### Scope matching
 
@@ -214,12 +214,12 @@ Permission check runs before `beforeToolCall`. A denied permission short-circuit
 18. Permission check runs before `beforeToolCall` hook
 19. `deny` decision skips `beforeToolCall` entirely
 20. Agent without `permissionManager` behaves identically to baseline
-21. `permission_needed` event includes `toolName`, `args`, `toolCallId`, `resolve`, and `rule`
+21. `permission_needed` event includes `toolName`, `args`, `toolCallId`, `resolve`, and `rule`; `resolve` accepts only `"allow"` or `"deny"`
 
 ### Edge cases
 
 22. No rules match a tool: wildcard `*` rule returns `deny`
-23. Multiple matching rules for same tool: last registered wins
+23. Multiple matching rules for same tool: last registered wins; grants append rather than replace existing rules
 24. Revoking a tool with no existing rules is a no-op
 25. Granting the same tool twice appends a new rule; later matching rules take precedence
 

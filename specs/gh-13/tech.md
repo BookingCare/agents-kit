@@ -176,10 +176,11 @@ export class PermissionManager {
 
 Important behavior:
 
-- `grant()` appends; it does not dedupe.
+- `grant()` appends; it does not dedupe or replace existing rules.
 - Reverse scan makes the most recently matching rule win.
 - Path checks are canonicalized with `path.resolve()` and boundary-aware prefix matching.
 - Command checks compare the first whitespace-delimited token only; no substring matching.
+- If a rule includes both `paths` and `commands`, either match is sufficient.
 
 ### Persistence and serialization
 
@@ -233,7 +234,7 @@ if (config.permissionManager) {
 }
 ```
 
-The pending approval wait must observe the active `AbortSignal` so an aborted run exits cleanly. No timeout or auto-deny path is added.
+The pending approval wait must observe the active `AbortSignal` so an aborted run exits cleanly; if nothing resolves it, the tool call stays suspended until the run is aborted. No timeout or auto-deny path is added.
 
 A minimal deferred helper is sufficient:
 
