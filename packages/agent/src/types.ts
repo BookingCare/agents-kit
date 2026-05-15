@@ -94,6 +94,37 @@ export interface AfterToolCallContext {
 
 export type AfterToolCallResult = { action: "continue" } | { action: "replace"; result: string };
 
+export interface PermissionScope {
+  paths?: string[];
+  commands?: string[];
+}
+
+export interface PermissionRule {
+  tool: string;
+  action: "allow" | "deny" | "ask";
+  scope?: PermissionScope;
+}
+
+export interface PermissionDecision {
+  action: "allow" | "deny" | "ask";
+  rule: PermissionRule;
+}
+
+export type PermissionResolver = (decision: "allow" | "deny") => void;
+
+export interface PermissionNeededEvent {
+  type: "permission_needed";
+  toolName: string;
+  args: Record<string, unknown>;
+  toolCallId: string;
+  rule: PermissionRule;
+  resolve: PermissionResolver;
+}
+
+export interface PermissionManagerOptions {
+  rules?: PermissionRule[];
+}
+
 export interface AgentLoopTurnUpdate {
   model?: Model<Api>;
   tools?: AgentTool[];
@@ -134,6 +165,9 @@ export interface AgentLoopConfig {
     context: BeforeToolCallContext,
     signal?: AbortSignal,
   ) => Promise<BeforeToolCallResult | undefined>;
+  permissionManager?: {
+    evaluate(toolName: string, args: Record<string, unknown>): PermissionDecision;
+  };
   afterToolCall?: (
     context: AfterToolCallContext,
     signal?: AbortSignal,
@@ -216,6 +250,7 @@ export type AgentEvent =
   | { type: "tool_execution_end"; toolCallId: string }
   | { type: "turn_end"; message: AgentMessage; toolResults: AgentMessage[] }
   | { type: "agent_end"; messages: AgentMessage[] }
+  | PermissionNeededEvent
   | ContextTrimmedEvent;
 
 export interface AgentContext {

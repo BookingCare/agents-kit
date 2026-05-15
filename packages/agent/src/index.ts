@@ -10,6 +10,11 @@ export type {
   BeforeToolCallResult,
   AfterToolCallContext,
   AfterToolCallResult,
+  PermissionManagerOptions,
+  PermissionRule,
+  PermissionDecision,
+  PermissionScope,
+  PermissionNeededEvent,
   AgentLoopTurnUpdate,
   AgentLoopConfig,
   AgentMessage,
@@ -42,5 +47,6 @@ export { TodoManager } from "./todo-manager.js";
 export type { TodoItem } from "./todo-manager.js";
 export { Agent } from "./agent.js";
 export type { AgentOptions } from "./agent.js";
+export { PermissionManager, DEFAULT_RULES } from "./permission-manager.js";
 export { BreakpointManager } from "./breakpoint-manager.js";
 export { ContextManager, slidingWindowStrategy } from "./context-manager.js";
