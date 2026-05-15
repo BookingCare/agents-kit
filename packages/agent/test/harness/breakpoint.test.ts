@@ -12,12 +12,14 @@ const echoTool: AgentTool = {
   execute: async (_id, params) => ({ content: (params as { message: string }).message }),
 };
 
-function createAgent(liveModel: LiveModel, tools: AgentTool[] = []) {
+function createAgent(liveModel: LiveModel, tools: AgentTool[] = [], streamFnOverride?: StreamFn) {
   let streamCalls = 0;
-  const streamFn: StreamFn = (streamModel, context, options) => {
-    streamCalls += 1;
-    return streamSimple(streamModel, context, options);
-  };
+  const streamFn: StreamFn =
+    streamFnOverride ??
+    ((streamModel, context, options) => {
+      streamCalls += 1;
+      return streamSimple(streamModel, context, options);
+    });
 
   const agent = new Agent({
     initialState: {
@@ -164,18 +166,65 @@ describe.skipIf(!auth)("BreakpointManager", () => {
     expect(getStreamCalls()).toBe(1);
   });
 
-  it("aborts cleanly while paused", async () => {
-    const { agent, getStreamCalls } = createAgent(getLiveModel());
+  it("reaches the pre_tool breakpoint before tool execution", async () => {
+    const { agent } = createAgent(getLiveModel(), [echoTool]);
+    const stages: string[] = [];
 
-    agent.setBreakpoint("pre_stream");
+    agent.setBreakpoint("pre_tool");
+    agent.onBreakpoint = async (hit) => {
+      stages.push(hit.stage);
+      agent.resume();
+    };
+
+    await agent.prompt("Use the echo tool to repeat hi exactly.");
+
+    expect(stages).toEqual(["pre_tool"]);
+  });
+
+  it("fires complete during failure handling", async () => {
+    const failingStreamFn: StreamFn = () => {
+      throw new Error("stream exploded");
+    };
+    const { agent } = createAgent(getLiveModel(), [], failingStreamFn);
+    const stages: string[] = [];
+
+    agent.setBreakpoint("complete");
+    agent.onBreakpoint = async (hit) => {
+      stages.push(hit.stage);
+      agent.resume();
+    };
+
+    await agent.prompt("Trigger failure");
+
+    expect(stages).toEqual(["complete"]);
+    expect(agent.state.messages.at(-1)?.role).toBe("assistant");
+    expect(agent.state.messages.at(-1)).toMatchObject({
+      errorMessage: "stream exploded",
+    });
+  });
+
+  it("aborts cleanly while paused after streaming", async () => {
+    const toolExecutions: string[] = [];
+    const { agent } = createAgent(getLiveModel(), [
+      {
+        ...echoTool,
+        execute: async (_id, params) => {
+          toolExecutions.push("echo");
+          return echoTool.execute(_id, params);
+        },
+      },
+    ]);
+
+    agent.setBreakpoint("post_stream");
     agent.onBreakpoint = async () => {
       agent.abort();
     };
 
-    await expect(agent.prompt("Stop")).resolves.toBeUndefined();
+    await expect(agent.prompt("Use the echo tool to repeat hi exactly.")).resolves.toBeUndefined();
 
-    expect(getStreamCalls()).toBe(0);
+    expect(toolExecutions).toHaveLength(0);
     expect(agent.state.isStreaming).toBe(false);
-    expect(agent.state.messages).toHaveLength(1);
+    expect(agent.state.messages).toHaveLength(2);
+    expect(agent.state.messages.at(-1)?.role).toBe("assistant");
   });
 });

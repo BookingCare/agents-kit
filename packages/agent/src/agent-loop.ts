@@ -272,6 +272,15 @@ async function loop(
     await emit({ type: "agent_end", messages: messages.slice() });
   };
 
+  const finishRunIfAborted = async (): Promise<boolean> => {
+    if (!signal.aborted) {
+      return false;
+    }
+
+    await finishRun();
+    return true;
+  };
+
   for (;;) {
     if (signal.aborted) {
       await finishRun();
@@ -380,8 +389,11 @@ async function loop(
     };
 
     await emit({ type: "message_end", message: assistantMessage });
-    await checkStage("post_stream");
     messages.push(assistantMessage);
+    await checkStage("post_stream");
+    if (await finishRunIfAborted()) {
+      return;
+    }
 
     // If no tool calls or error, check for follow-ups then exit
     const hasToolCalls = result.toolCalls.length > 0;
@@ -393,6 +405,9 @@ async function loop(
 
     if (isStop || !hasToolCalls) {
       await checkStage("pre_followup");
+      if (await finishRunIfAborted()) {
+        return;
+      }
 
       // Drain follow-up queue
       const followUps = await config.getFollowUpMessages();
@@ -410,6 +425,11 @@ async function loop(
       return;
     }
 
+    await checkStage("pre_tool");
+    if (await finishRunIfAborted()) {
+      return;
+    }
+
     // Execute tool calls
     const toolResults = await executeToolCalls(
       result.toolCalls,
@@ -422,14 +442,24 @@ async function loop(
       },
     );
 
+    if (await finishRunIfAborted()) {
+      return;
+    }
+
     for (const tr of toolResults) {
       messages.push(tr);
     }
 
     await emit({ type: "turn_end", message: assistantMessage, toolResults });
     await checkStage("post_tool");
+    if (await finishRunIfAborted()) {
+      return;
+    }
 
     await checkStage("pre_followup");
+    if (await finishRunIfAborted()) {
+      return;
+    }
 
     // Check for steering messages
     const steering = await config.getSteeringMessages();
@@ -599,6 +629,20 @@ async function executeToolCalls(
 
     if (beforeToolExecute) {
       await beforeToolExecute();
+    }
+
+    if (signal.aborted) {
+      return {
+        kind: "skip",
+        result: {
+          role: "toolResult",
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          content: [{ type: "text" as const, text: "" }],
+          isError: false,
+          timestamp: Date.now(),
+        },
+      };
     }
 
     return {

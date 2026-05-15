@@ -600,6 +600,64 @@ export class Agent {
     };
   }
 
+  private async waitForBreakpoint(stage: BreakpointStage, context: AgentContext): Promise<void> {
+    const manager = this.breakpointManager;
+    const shouldPause = manager.isPaused() || manager.shouldPauseAt(stage, context);
+    if (!shouldPause) {
+      return;
+    }
+
+    if (!manager.isPaused()) {
+      manager.pause();
+    }
+
+    const hit: BreakpointHit = {
+      stage,
+      context,
+      snapshot: this.createStateSnapshot(),
+    };
+
+    try {
+      await this.onBreakpoint?.(hit);
+    } catch (error) {
+      manager.resume();
+      throw error;
+    }
+
+    const resumeWait = manager.resumeWait;
+    if (!resumeWait) {
+      return;
+    }
+
+    const abortSignal = this.signal;
+    if (abortSignal?.aborted) {
+      manager.resume();
+      return;
+    }
+
+    let removeAbortListener = () => {};
+    const abortWait = abortSignal
+      ? new Promise<void>((resolve) => {
+          const onAbort = () => {
+            abortSignal.removeEventListener("abort", onAbort);
+            resolve();
+          };
+          removeAbortListener = () => abortSignal.removeEventListener("abort", onAbort);
+          abortSignal.addEventListener("abort", onAbort, { once: true });
+        })
+      : Promise.resolve();
+
+    try {
+      await Promise.race([resumeWait, abortWait]);
+    } finally {
+      removeAbortListener();
+    }
+
+    if (abortSignal?.aborted) {
+      manager.resume();
+    }
+  }
+
   private createLoopConfig(options: { skipInitialSteeringPoll?: boolean } = {}): AgentLoopConfig {
     let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
     return {
@@ -611,61 +669,7 @@ export class Agent {
       maxRetryDelayMs: this.maxRetryDelayMs,
       toolExecution: this.toolExecution,
       beforeStage: async (stage, context) => {
-        const manager = this.breakpointManager;
-        const shouldPause = manager.isPaused() || manager.shouldPauseAt(stage, context);
-        if (!shouldPause) {
-          return;
-        }
-
-        if (!manager.isPaused()) {
-          manager.pause();
-        }
-
-        const hit: BreakpointHit = {
-          stage,
-          context,
-          snapshot: this.createStateSnapshot(),
-        };
-
-        try {
-          await this.onBreakpoint?.(hit);
-        } catch (error) {
-          manager.resume();
-          throw error;
-        }
-
-        const resumeWait = manager.resumeWait;
-        if (!resumeWait) {
-          return;
-        }
-
-        const abortSignal = this.signal;
-        if (abortSignal?.aborted) {
-          manager.resume();
-          return;
-        }
-
-        let removeAbortListener = () => {};
-        const abortWait = abortSignal
-          ? new Promise<void>((resolve) => {
-              const onAbort = () => {
-                abortSignal.removeEventListener("abort", onAbort);
-                resolve();
-              };
-              removeAbortListener = () => abortSignal.removeEventListener("abort", onAbort);
-              abortSignal.addEventListener("abort", onAbort, { once: true });
-            })
-          : Promise.resolve();
-
-        try {
-          await Promise.race([resumeWait, abortWait]);
-        } finally {
-          removeAbortListener();
-        }
-
-        if (abortSignal?.aborted) {
-          manager.resume();
-        }
+        await this.waitForBreakpoint(stage, context);
       },
       beforeToolCall: this.beforeToolCall,
       afterToolCall: this.afterToolCall,
@@ -733,6 +737,15 @@ export class Agent {
     await this.processEvents({ type: "message_start", message: streamingPartial });
     await this.processEvents({ type: "message_end", message: failureMessage });
     await this.processEvents({ type: "turn_end", message: failureMessage, toolResults: [] });
+    try {
+      await this.waitForBreakpoint("complete", this.createContextSnapshot());
+    } catch (breakpointError) {
+      console.warn(
+        `[agent] breakpoint error during complete: ${
+          breakpointError instanceof Error ? breakpointError.message : String(breakpointError)
+        }`,
+      );
+    }
     await this.processEvents({ type: "agent_end", messages: [failureMessage] });
   }
 
