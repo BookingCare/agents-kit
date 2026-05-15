@@ -1,21 +1,10 @@
-import { Type, getModel } from "@bookingcare/ai";
+import { Type } from "@bookingcare/ai";
 import { describe, expect, it } from "vitest";
 import { Agent, type AgentEvent, type AgentMessage, type AgentTool } from "../src/index.js";
-import { applyAuth } from "./helpers/auth.js";
-
-const auth = applyAuth();
-type LiveModel = NonNullable<ReturnType<typeof getModel>>;
+import { auth, liveModel as getLiveModel, type LiveModel } from "./helpers/live-model.js";
 
 const IMAGE_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO3Z4eQAAAAASUVORK5CYII=";
-
-function model(): LiveModel {
-  const liveModel = getModel("gpt-5.4-nano");
-  if (!liveModel) {
-    throw new Error("Model not found: gpt-5.4-nano");
-  }
-  return liveModel;
-}
 
 function createAgent(liveModel: LiveModel, tools: AgentTool[] = [], systemPrompt = "") {
   return new Agent({
@@ -76,7 +65,7 @@ const failTool: AgentTool = {
 describe.skipIf(!auth)("Agent", () => {
   it("emits message lifecycle events on prompt", async () => {
     const agent = createAgent(
-      model(),
+      getLiveModel(),
       [],
       "You are a helpful assistant. Keep your responses concise.",
     );
@@ -102,7 +91,7 @@ describe.skipIf(!auth)("Agent", () => {
   });
 
   it("throws if prompt is called while already running", async () => {
-    const agent = createAgent(model(), [], "You are a helpful assistant.");
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
     const firstPrompt = agent.prompt(
       "Write a long, detailed explanation of how to stay calm during a busy day, using at least eight numbered points.",
     );
@@ -114,7 +103,7 @@ describe.skipIf(!auth)("Agent", () => {
 
   it("executes tool calls and returns results", async () => {
     const agent = createAgent(
-      model(),
+      getLiveModel(),
       [echoTool],
       "You are a helpful assistant. When asked to repeat a word, you must use the echo tool.",
     );
@@ -144,7 +133,7 @@ describe.skipIf(!auth)("Agent", () => {
 
   it("handles tool execution errors gracefully", async () => {
     const agent = createAgent(
-      model(),
+      getLiveModel(),
       [failTool],
       "You are a helpful assistant. When asked to fail, call the fail tool.",
     );
@@ -156,7 +145,7 @@ describe.skipIf(!auth)("Agent", () => {
   });
 
   it("aborts a running prompt", async () => {
-    const agent = createAgent(model(), [], "You are a helpful assistant.");
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
     const prompt = agent.prompt(
       "Write a long, detailed explanation of how the internet works in at least ten paragraphs.",
     );
@@ -172,7 +161,7 @@ describe.skipIf(!auth)("Agent", () => {
 
   it("steer injects messages between turns", async () => {
     const agent = createAgent(
-      model(),
+      getLiveModel(),
       [echoTool],
       "You are a helpful assistant. When asked to repeat a word, you must use the echo tool.",
     );
@@ -191,7 +180,7 @@ describe.skipIf(!auth)("Agent", () => {
   });
 
   it("followUp runs after agent would otherwise stop", async () => {
-    const agent = createAgent(model(), [], "You are a helpful assistant.");
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
 
     agent.followUp({ role: "user", content: "Continue", timestamp: Date.now() });
 
@@ -206,7 +195,7 @@ describe.skipIf(!auth)("Agent", () => {
   });
 
   it("subscribe returns unsubscribe function", async () => {
-    const agent = createAgent(model(), [], "You are a helpful assistant.");
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
     const events: AgentEvent[] = [];
 
     const unsubscribe = agent.subscribe((event) => {
@@ -220,7 +209,7 @@ describe.skipIf(!auth)("Agent", () => {
   });
 
   it("reset clears messages and queues", async () => {
-    const agent = createAgent(model(), [], "You are a helpful assistant.");
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
 
     await agent.prompt("Test");
     agent.steer({ role: "user", content: "steer", timestamp: Date.now() });
@@ -236,13 +225,13 @@ describe.skipIf(!auth)("Agent", () => {
   });
 
   it("cannot continue from empty messages", async () => {
-    const agent = createAgent(model(), [], "You are a helpful assistant.");
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
 
     await expect(agent.continue()).rejects.toThrow("No messages to continue from");
   });
 
   it("cannot continue from assistant message without queued messages", async () => {
-    const liveModel = model();
+    const liveModel = getLiveModel();
     const agent = new Agent({
       initialState: {
         model: liveModel,
@@ -276,7 +265,7 @@ describe.skipIf(!auth)("Agent", () => {
   });
 
   it("clearSteeringQueue and clearFollowUpQueue work", () => {
-    const agent = createAgent(model(), [], "You are a helpful assistant.");
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
 
     agent.steer({ role: "user", content: "s1", timestamp: Date.now() });
     agent.followUp({ role: "user", content: "f1", timestamp: Date.now() });
@@ -291,7 +280,7 @@ describe.skipIf(!auth)("Agent", () => {
   });
 
   it("supports prompt with string and images", async () => {
-    const agent = createAgent(model(), [], "You are a helpful assistant.");
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
 
     await agent.prompt("Describe this", [
       {
@@ -306,7 +295,7 @@ describe.skipIf(!auth)("Agent", () => {
   });
 
   it("supports prompt with AgentMessage array", async () => {
-    const agent = createAgent(model(), [], "You are a helpful assistant.");
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
 
     await agent.prompt([
       { role: "user", content: "First", timestamp: Date.now() },

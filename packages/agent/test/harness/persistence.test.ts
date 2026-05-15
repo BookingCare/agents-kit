@@ -2,23 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { getModel } from "@bookingcare/ai";
+import { auth, liveModel as getLiveModel } from "../helpers/live-model.js";
 import { Agent } from "../../src/agent.js";
 import { JSONStore, NotFoundError } from "@bookingcare/db";
 import { TodoManager } from "../../src/todo-manager.js";
-import { applyAuth } from "../helpers/auth.js";
-
-type LiveModel = NonNullable<ReturnType<typeof getModel>>;
-
-const auth = applyAuth();
-
-function model(): LiveModel {
-  const liveModel = getModel("gpt-5.4-nano");
-  if (!liveModel) {
-    throw new Error("Model not found: gpt-5.4-nano");
-  }
-  return liveModel;
-}
 
 async function createTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "agent-persist-"));
@@ -38,13 +25,13 @@ describe.skipIf(!auth)("Agent persistence", () => {
   });
 
   it("generates sessionId when store is provided but no sessionId", () => {
-    const agent = new Agent({ initialState: { model: model() }, store });
+    const agent = new Agent({ initialState: { model: getLiveModel() }, store });
     expect(agent.sessionId).toBeDefined();
     expect(typeof agent.sessionId).toBe("string");
   });
 
   it("leaves sessionId undefined when no store is provided", () => {
-    const agent = new Agent({ initialState: { model: model() } });
+    const agent = new Agent({ initialState: { model: getLiveModel() } });
     expect(agent.sessionId).toBeUndefined();
   });
 
@@ -53,7 +40,7 @@ describe.skipIf(!auth)("Agent persistence", () => {
 
     const agent = new Agent({
       initialState: {
-        model: model(),
+        model: getLiveModel(),
         systemPrompt: "You are helpful.",
         thinkingLevel: "off",
         tools: [],
@@ -76,7 +63,7 @@ describe.skipIf(!auth)("Agent persistence", () => {
 
     const agent = new Agent({
       initialState: {
-        model: model(),
+        model: getLiveModel(),
         systemPrompt: "You are helpful.",
         thinkingLevel: "off",
         tools: [],
@@ -96,7 +83,7 @@ describe.skipIf(!auth)("Agent persistence", () => {
     const resumed = await Agent.resume({
       sessionId,
       store,
-      model: model(),
+      model: getLiveModel(),
       todoManager: newTodoManager,
     });
 
@@ -110,14 +97,14 @@ describe.skipIf(!auth)("Agent persistence", () => {
   });
 
   it("throws NotFoundError when resuming non-existent session", async () => {
-    await expect(Agent.resume({ sessionId: "nonexistent", store, model: model() })).rejects.toThrow(
-      NotFoundError,
-    );
+    await expect(
+      Agent.resume({ sessionId: "nonexistent", store, model: getLiveModel() }),
+    ).rejects.toThrow(NotFoundError);
   });
 
   it("stores info with correct model and provider", async () => {
     const sessionId = "info-test";
-    const liveModel = model();
+    const liveModel = getLiveModel();
 
     const agent = new Agent({
       initialState: {
@@ -144,7 +131,7 @@ describe.skipIf(!auth)("Agent persistence", () => {
   });
 
   it("does not throw when no store is configured", () => {
-    const agent = new Agent({ initialState: { model: model() } });
+    const agent = new Agent({ initialState: { model: getLiveModel() } });
     expect(agent.state.messages).toEqual([]);
     expect(agent.state.systemPrompt).toBe("");
   });
@@ -152,7 +139,7 @@ describe.skipIf(!auth)("Agent persistence", () => {
   it("does not persist when store is not configured", async () => {
     const sessionId = "no-store";
     const agent = new Agent({
-      initialState: { model: model(), thinkingLevel: "off", tools: [] },
+      initialState: { model: getLiveModel(), thinkingLevel: "off", tools: [] },
       sessionId,
     });
 
@@ -165,7 +152,7 @@ describe.skipIf(!auth)("Agent persistence", () => {
     const sessionId = "no-todo-mgr";
 
     const agent = new Agent({
-      initialState: { model: model(), thinkingLevel: "off", tools: [] },
+      initialState: { model: getLiveModel(), thinkingLevel: "off", tools: [] },
       sessionId,
       store,
     });

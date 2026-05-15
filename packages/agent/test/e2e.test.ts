@@ -1,11 +1,7 @@
-import { Type, getModel } from "@bookingcare/ai";
+import { Type } from "@bookingcare/ai";
 import { describe, expect, it } from "vitest";
 import { Agent, type AgentEvent, type AgentMessage, type AgentTool } from "../src/index.js";
-import { applyAuth } from "./helpers/auth.js";
-
-const auth = applyAuth();
-
-type LiveModel = NonNullable<ReturnType<typeof getModel>>;
+import { auth, liveModel as getLiveModel, type LiveModel } from "./helpers/live-model.js";
 
 const echoTool: AgentTool = {
   name: "echo",
@@ -16,14 +12,6 @@ const echoTool: AgentTool = {
     content: (params as { message: string }).message,
   }),
 };
-
-function model(): LiveModel {
-  const liveModel = getModel("gpt-5.4-nano");
-  if (!liveModel) {
-    throw new Error("Model not found: gpt-5.4-nano");
-  }
-  return liveModel;
-}
 
 function getTextContent(message: AgentMessage): string {
   if (typeof message.content === "string") {
@@ -152,18 +140,18 @@ async function multiTurnConversation(liveModel: LiveModel) {
 
 describe.skipIf(!auth)("Agent e2e", () => {
   it("handles a basic text prompt", async () => {
-    await basicPrompt(model());
+    await basicPrompt(getLiveModel());
   });
 
   it("executes tools and tracks pending tool calls", async () => {
-    await toolExecution(model());
+    await toolExecution(getLiveModel());
   });
 
   it("emits lifecycle updates while streaming", async () => {
-    await stateUpdates(model());
+    await stateUpdates(getLiveModel());
   });
 
   it("maintains context across multiple turns", async () => {
-    await multiTurnConversation(model());
+    await multiTurnConversation(getLiveModel());
   });
 });

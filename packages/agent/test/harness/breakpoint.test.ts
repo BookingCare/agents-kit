@@ -1,20 +1,8 @@
-import { Type, getModel, streamSimple } from "@bookingcare/ai";
+import { Type, streamSimple } from "@bookingcare/ai";
 import { describe, expect, it } from "vitest";
 import { Agent } from "../../src/agent.js";
 import type { AgentEvent, AgentMessage, AgentTool, StreamFn } from "../../src/types.js";
-import { applyAuth } from "../helpers/auth.js";
-
-const auth = applyAuth();
-
-type LiveModel = NonNullable<ReturnType<typeof getModel>>;
-
-function model(): LiveModel {
-  const liveModel = getModel("gpt-5.4-nano");
-  if (!liveModel) {
-    throw new Error("Model not found: gpt-5.4-nano");
-  }
-  return liveModel;
-}
+import { auth, liveModel as getLiveModel, type LiveModel } from "../helpers/live-model.js";
 
 const echoTool: AgentTool = {
   name: "echo",
@@ -47,7 +35,7 @@ function createAgent(liveModel: LiveModel, tools: AgentTool[] = []) {
 
 describe.skipIf(!auth)("BreakpointManager", () => {
   it("pauses before stream start and exposes isolated snapshots", async () => {
-    const { agent, getStreamCalls } = createAgent(model());
+    const { agent, getStreamCalls } = createAgent(getLiveModel());
 
     agent.setBreakpoint("pre_stream", (context) =>
       context.messages.some((message) => message.role === "user"),
@@ -94,8 +82,12 @@ describe.skipIf(!auth)("BreakpointManager", () => {
   });
 
   it("pauses on an explicit pause at the next boundary", async () => {
-    const { agent, getStreamCalls } = createAgent(model(), [echoTool]);
+    const { agent, getStreamCalls } = createAgent(getLiveModel(), [echoTool]);
     const events: AgentEvent[] = [];
+    let releaseBreakpoint!: () => void;
+    const breakpointReached = new Promise<void>((resolve) => {
+      releaseBreakpoint = resolve;
+    });
 
     agent.subscribe((event) => {
       events.push(event);
@@ -107,16 +99,30 @@ describe.skipIf(!auth)("BreakpointManager", () => {
     agent.onBreakpoint = async (hit) => {
       expect(hit.stage).toBe("post_stream");
       expect(events.some((event) => event.type === "tool_execution_start")).toBe(false);
-      agent.resume();
+      releaseBreakpoint();
     };
 
-    await agent.prompt("Use the echo tool to repeat hi exactly.");
+    const promptPromise = agent.prompt("Use the echo tool to repeat hi exactly.");
+    await breakpointReached;
 
+    expect(agent.state.isStreaming).toBe(true);
+    const idlePromise = agent.waitForIdle();
+    const settledBeforeResume = await Promise.race([
+      idlePromise.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 25)),
+    ]);
+    expect(settledBeforeResume).toBe(false);
+
+    agent.resume();
+    await idlePromise;
+    await promptPromise;
+
+    expect(agent.state.isStreaming).toBe(false);
     expect(getStreamCalls()).toBe(2);
   });
 
   it("clears individual breakpoints and all breakpoints", async () => {
-    const { agent: firstAgent } = createAgent(model());
+    const { agent: firstAgent } = createAgent(getLiveModel());
     let firstBreakpointHits = 0;
 
     firstAgent.setBreakpoint("pre_stream");
@@ -128,7 +134,7 @@ describe.skipIf(!auth)("BreakpointManager", () => {
     await firstAgent.prompt("One");
     expect(firstBreakpointHits).toBe(0);
 
-    const { agent: secondAgent } = createAgent(model());
+    const { agent: secondAgent } = createAgent(getLiveModel());
     let secondBreakpointHits = 0;
 
     secondAgent.setBreakpoint("pre_stream");
@@ -143,7 +149,7 @@ describe.skipIf(!auth)("BreakpointManager", () => {
   });
 
   it("fires complete exactly once at shutdown", async () => {
-    const { agent, getStreamCalls } = createAgent(model());
+    const { agent, getStreamCalls } = createAgent(getLiveModel());
     const stages: string[] = [];
 
     agent.setBreakpoint("complete");
@@ -159,7 +165,7 @@ describe.skipIf(!auth)("BreakpointManager", () => {
   });
 
   it("aborts cleanly while paused", async () => {
-    const { agent, getStreamCalls } = createAgent(model());
+    const { agent, getStreamCalls } = createAgent(getLiveModel());
 
     agent.setBreakpoint("pre_stream");
     agent.onBreakpoint = async () => {
