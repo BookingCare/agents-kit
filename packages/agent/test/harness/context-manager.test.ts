@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { ContextManager, slidingWindowStrategy } from "../src/context-manager.js";
-import type { ContextStrategy, TokenCounter } from "../src/types.js";
-import type { AgentMessage } from "../src/types.js";
+import { ContextManager, slidingWindowStrategy } from "../../src/context-manager.js";
+import type { ContextStrategy, TokenCounter } from "../../src/types.js";
+import type { AgentMessage } from "../../src/types.js";
 
 describe("ContextManager", () => {
   describe("token estimation", () => {

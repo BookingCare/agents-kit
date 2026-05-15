@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { stream, streamSimple, collectStream, type Message } from "@bookingcare/ai";
 import { getModel, type Model } from "@bookingcare/ai";
-import { ContextManager, slidingWindowStrategy } from "../src/index.js";
-import { applyAuth } from "../test/helpers/auth.js";
-import type { AgentMessage } from "../src/types.js";
+import { ContextManager, slidingWindowStrategy } from "../../src/index.js";
+import { applyAuth } from "../helpers/auth.js";
+import type { AgentMessage } from "../../src/types.js";
 
 const auth = applyAuth();
 

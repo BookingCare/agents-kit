@@ -1,22 +1,20 @@
-import { Type } from "@bookingcare/ai";
-import { describe, expect, it, vi } from "vitest";
+import { Type, getModel, streamSimple } from "@bookingcare/ai";
+import { describe, expect, it } from "vitest";
 import { Agent } from "../src/agent.js";
 import type { AgentEvent, AgentMessage, AgentTool, StreamFn } from "../src/types.js";
-import { createMockStream } from "./helpers/helpers.js";
-import type { Model } from "@bookingcare/ai";
+import { applyAuth } from "./helpers/auth.js";
 
-const TEST_MODEL: Model<"openai-completions"> = {
-  id: "test-model",
-  name: "Test Model",
-  api: "openai-completions",
-  provider: "openai",
-  baseUrl: "https://test.example.com",
-  reasoning: false,
-  input: ["text"],
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  contextWindow: 4096,
-  maxTokens: 1024,
-};
+const auth = applyAuth();
+
+type LiveModel = NonNullable<ReturnType<typeof getModel>>;
+
+function model(): LiveModel {
+  const liveModel = getModel("gpt-5.4-nano");
+  if (!liveModel) {
+    throw new Error("Model not found: gpt-5.4-nano");
+  }
+  return liveModel;
+}
 
 const echoTool: AgentTool = {
   name: "echo",
@@ -26,23 +24,30 @@ const echoTool: AgentTool = {
   execute: async (_id, params) => ({ content: (params as { message: string }).message }),
 };
 
-function createAgent(streamFn: ReturnType<typeof createMockStream>, tools: AgentTool[] = []) {
-  return new Agent({
+function createAgent(liveModel: LiveModel, tools: AgentTool[] = []) {
+  let streamCalls = 0;
+  const streamFn: StreamFn = (streamModel, context, options) => {
+    streamCalls += 1;
+    return streamSimple(streamModel, context, options);
+  };
+
+  const agent = new Agent({
     initialState: {
-      model: TEST_MODEL,
+      model: liveModel,
       systemPrompt: "",
       thinkingLevel: "off",
       tools,
       messages: [],
     },
-    streamFn: streamFn as unknown as StreamFn,
+    streamFn,
   });
+
+  return { agent, getStreamCalls: () => streamCalls };
 }
 
-describe("BreakpointManager", () => {
+describe.skipIf(!auth)("BreakpointManager", () => {
   it("pauses before stream start and exposes isolated snapshots", async () => {
-    const streamFn = createMockStream([{ text: "Hello" }]);
-    const agent = createAgent(streamFn);
+    const { agent, getStreamCalls } = createAgent(model());
 
     agent.setBreakpoint("pre_stream", (context) =>
       context.messages.some((message) => message.role === "user"),
@@ -69,13 +74,13 @@ describe("BreakpointManager", () => {
       hit.context.messages.push(contextMutation);
       hit.snapshot.messages.push(snapshotMutation);
 
-      expect(streamFn).not.toHaveBeenCalled();
+      expect(getStreamCalls()).toBe(0);
       agent.resume();
     };
 
     await agent.prompt("Hello");
 
-    expect(streamFn).toHaveBeenCalledTimes(1);
+    expect(getStreamCalls()).toBe(1);
     expect(
       agent.state.messages.some(
         (message) => typeof message.content === "string" && message.content === "mutated-context",
@@ -89,15 +94,7 @@ describe("BreakpointManager", () => {
   });
 
   it("pauses on an explicit pause at the next boundary", async () => {
-    const streamFn = createMockStream([
-      {
-        text: "",
-        toolCalls: [{ type: "toolCall", id: "tc1", name: "echo", arguments: { message: "hi" } }],
-        stopReason: "toolUse",
-      },
-      { text: "Done" },
-    ]);
-    const agent = createAgent(streamFn, [echoTool]);
+    const { agent, getStreamCalls } = createAgent(model(), [echoTool]);
     const events: AgentEvent[] = [];
 
     agent.subscribe((event) => {
@@ -113,43 +110,40 @@ describe("BreakpointManager", () => {
       agent.resume();
     };
 
-    await agent.prompt("Use echo");
+    await agent.prompt("Use the echo tool to repeat hi exactly.");
 
-    expect(streamFn).toHaveBeenCalledTimes(2);
+    expect(getStreamCalls()).toBe(2);
   });
 
   it("clears individual breakpoints and all breakpoints", async () => {
-    const firstStream = createMockStream([{ text: "First" }]);
-    const firstAgent = createAgent(firstStream);
-    const firstBreakpoint = vi.fn();
+    const { agent: firstAgent } = createAgent(model());
+    let firstBreakpointHits = 0;
 
     firstAgent.setBreakpoint("pre_stream");
     firstAgent.clearBreakpoint("pre_stream");
     firstAgent.onBreakpoint = async () => {
-      firstBreakpoint();
+      firstBreakpointHits += 1;
     };
 
     await firstAgent.prompt("One");
-    expect(firstBreakpoint).not.toHaveBeenCalled();
+    expect(firstBreakpointHits).toBe(0);
 
-    const secondStream = createMockStream([{ text: "Second" }]);
-    const secondAgent = createAgent(secondStream);
-    const secondBreakpoint = vi.fn();
+    const { agent: secondAgent } = createAgent(model());
+    let secondBreakpointHits = 0;
 
     secondAgent.setBreakpoint("pre_stream");
     secondAgent.setBreakpoint("post_stream");
     secondAgent.clearAllBreakpoints();
     secondAgent.onBreakpoint = async () => {
-      secondBreakpoint();
+      secondBreakpointHits += 1;
     };
 
     await secondAgent.prompt("Two");
-    expect(secondBreakpoint).not.toHaveBeenCalled();
+    expect(secondBreakpointHits).toBe(0);
   });
 
   it("fires complete exactly once at shutdown", async () => {
-    const streamFn = createMockStream([{ text: "Done" }]);
-    const agent = createAgent(streamFn);
+    const { agent, getStreamCalls } = createAgent(model());
     const stages: string[] = [];
 
     agent.setBreakpoint("complete");
@@ -161,12 +155,11 @@ describe("BreakpointManager", () => {
     await agent.prompt("Finish");
 
     expect(stages).toEqual(["complete"]);
-    expect(streamFn).toHaveBeenCalledTimes(1);
+    expect(getStreamCalls()).toBe(1);
   });
 
   it("aborts cleanly while paused", async () => {
-    const streamFn = createMockStream([{ text: "Will not run" }]);
-    const agent = createAgent(streamFn);
+    const { agent, getStreamCalls } = createAgent(model());
 
     agent.setBreakpoint("pre_stream");
     agent.onBreakpoint = async () => {
@@ -175,7 +168,7 @@ describe("BreakpointManager", () => {
 
     await expect(agent.prompt("Stop")).resolves.toBeUndefined();
 
-    expect(streamFn).not.toHaveBeenCalled();
+    expect(getStreamCalls()).toBe(0);
     expect(agent.state.isStreaming).toBe(false);
     expect(agent.state.messages).toHaveLength(1);
   });
