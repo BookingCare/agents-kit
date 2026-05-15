@@ -1,8 +1,8 @@
 import { Type, getModel, streamSimple } from "@bookingcare/ai";
 import { describe, expect, it } from "vitest";
-import { Agent } from "../src/agent.js";
-import type { AgentEvent, AgentMessage, AgentTool, StreamFn } from "../src/types.js";
-import { applyAuth } from "./helpers/auth.js";
+import { Agent } from "../../src/agent.js";
+import type { AgentEvent, AgentMessage, AgentTool, StreamFn } from "../../src/types.js";
+import { applyAuth } from "../helpers/auth.js";
 
 const auth = applyAuth();
 
