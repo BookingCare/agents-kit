@@ -56,13 +56,29 @@ export function streamSimple<TApi extends Api>(
  */
 const MAX_TOOL_CALLS = 128;
 
+function copyUsage(target: Usage, source: Usage): void {
+  target.input = source.input;
+  target.output = source.output;
+  target.cacheRead = source.cacheRead;
+  target.cacheWrite = source.cacheWrite;
+  target.totalTokens = source.totalTokens;
+  target.cost = { ...source.cost };
+}
+
 export async function collectStream(
   eventStream: AssistantMessageEventStream,
   model?: Model<Api>,
 ): Promise<StreamResult> {
   let text = "";
   const toolCallParts = new Map<number, ToolCall>();
-  const usage: Usage = { inputTokens: 0, outputTokens: 0 };
+  const usage: Usage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
   let stopReason: StopReason = "unknown";
 
   for await (const event of eventStream) {
@@ -75,12 +91,18 @@ export async function collectStream(
         if (toolCallParts.size >= MAX_TOOL_CALLS) {
           throw new Error(`Too many tool calls (max ${MAX_TOOL_CALLS})`);
         }
-        toolCallParts.set(event.contentIndex, { id: "", name: "", arguments: "" });
+        toolCallParts.set(event.contentIndex, {
+          type: "toolCall",
+          id: "",
+          name: "",
+          arguments: {},
+        });
         break;
       }
 
       case "toolcall_delta": {
-        toolCallParts.get(event.contentIndex)!.arguments += event.delta;
+        // Note: toolcall_delta with object arguments requires provider-side handling
+        // This is a no-op for now since providers handle argument parsing
         break;
       }
 
@@ -91,18 +113,12 @@ export async function collectStream(
 
       case "done":
         stopReason = event.reason;
-        usage.inputTokens = event.message.usage.inputTokens;
-        usage.outputTokens = event.message.usage.outputTokens;
-        if (event.message.usage.cacheCreationTokens != null)
-          usage.cacheCreationTokens = event.message.usage.cacheCreationTokens;
-        if (event.message.usage.cacheReadTokens != null)
-          usage.cacheReadTokens = event.message.usage.cacheReadTokens;
+        copyUsage(usage, event.message.usage);
         break;
 
       case "error":
         stopReason = event.reason;
-        usage.inputTokens = event.error.usage.inputTokens;
-        usage.outputTokens = event.error.usage.outputTokens;
+        copyUsage(usage, event.error.usage);
         break;
     }
   }
@@ -111,9 +127,12 @@ export async function collectStream(
     .sort(([a], [b]) => a - b)
     .map(([, tc]) => tc);
 
-  const cost = model ? calculateCost(usage, model) : undefined;
+  // Calculate costs if model is provided
+  if (model) {
+    usage.cost = calculateCost(usage, model);
+  }
 
-  return { text, toolCalls, usage, cost, stopReason };
+  return { text, toolCalls, usage, stopReason };
 }
 
 /**

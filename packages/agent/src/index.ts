@@ -20,6 +20,8 @@ export type {
   AgentEvent,
   AgentContext,
   QueueMode,
+  ContextStrategy,
+  TokenCounter,
 } from "./types.js";
 
 export { agentLoop, runAgentLoop, runAgentLoopContinue } from "./agent-loop.js";
@@ -37,3 +39,4 @@ export { TodoManager } from "./todo-manager.js";
 export type { TodoItem } from "./todo-manager.js";
 export { Agent } from "./agent.js";
 export type { AgentOptions } from "./agent.js";
+export { ContextManager, slidingWindowStrategy } from "./context-manager.js";

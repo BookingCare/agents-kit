@@ -95,7 +95,7 @@ describe("Agent", () => {
     const streamFn = createMockStream([
       {
         text: "",
-        toolCalls: [{ id: "tc1", name: "echo", arguments: '{"message":"hi"}' }],
+        toolCalls: [{ type: "toolCall", id: "tc1", name: "echo", arguments: { message: "hi" } }],
         stopReason: "toolUse",
       },
       { text: "Done" },
@@ -146,7 +146,7 @@ describe("Agent", () => {
     const streamFn = createMockStream([
       {
         text: "",
-        toolCalls: [{ id: "tc1", name: "fail", arguments: "{}" }],
+        toolCalls: [{ type: "toolCall", id: "tc1", name: "fail", arguments: {} }],
         stopReason: "toolUse",
       },
       { text: "Recovered" },
@@ -211,7 +211,7 @@ describe("Agent", () => {
     const streamFn = createMockStream([
       {
         text: "",
-        toolCalls: [{ id: "tc1", name: "echo", arguments: '{"message":"first"}' }],
+        toolCalls: [{ type: "toolCall", id: "tc1", name: "echo", arguments: { message: "first" } }],
         stopReason: "toolUse",
       },
       { text: "Final" },
@@ -350,7 +350,14 @@ describe("Agent", () => {
             api: "openai-completions",
             provider: "openai",
             model: "test",
-            usage: { inputTokens: 1, outputTokens: 1 },
+            usage: {
+              input: 1,
+              output: 1,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 2,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
             stopReason: "stop",
             timestamp: Date.now(),
           },
