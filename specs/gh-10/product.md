@@ -56,6 +56,9 @@ agent.setBreakpoint("pre_tool");
 // Conditional — pauses only when condition returns true
 agent.setBreakpoint("pre_tool", (context) => context.tools.some((t) => t.name === "bash"));
 
+// Breakpoint before follow-up/steering messages drain
+agent.setBreakpoint("pre_followup", (context) => context.messages.length > 10);
+
 await agent.prompt("Run a command");
 // Loop pauses before executing tool calls
 ```
@@ -78,7 +81,8 @@ await agent.prompt("...");
 // Agent pauses at next relevant stage
 
 // Later, after external review:
-await agent.resume(); // continues from where it paused
+agent.resume(); // synchronous signal
+await agent.waitForIdle(); // if you need to wait for completion
 ```
 
 ### Breakpoint callback
@@ -100,20 +104,22 @@ agent.onBreakpoint = (hit) => {
 | #   | Stage          | When reached                                               |
 | --- | -------------- | ---------------------------------------------------------- |
 | 1   | `pre_stream`   | Before the LLM stream request is initiated                 |
-| 2   | `streaming`    | First `message_start` event emitted                        |
-| 3   | `post_stream`  | `message_end` event emitted                                |
+| 2   | `streaming`    | Before the first `message_start` is emitted to subscribers |
+| 3   | `post_stream`  | Immediately after `message_end` is emitted to subscribers  |
 | 4   | `pre_tool`     | Before `executeToolCalls` begins                           |
-| 5   | `tool_exec`    | Immediately after each individual tool's `execute` starts  |
+| 5   | `tool_exec`    | Immediately before each individual tool's `execute` starts |
 | 6   | `post_tool`    | After all tools in a turn complete (`turn_end` emitted)    |
 | 7   | `pre_followup` | Before `getFollowUpMessages` / `getSteeringMessages` drain |
-| 8   | `complete`     | `agent_end` event emitted                                  |
+| 8   | `complete`     | Immediately before `agent_end` is emitted                  |
 
-### Dual pause modes
+### Pause behavior
 
-When an agent is paused, it is in one of two pause source modes:
+The loop suspends at a stage boundary and waits for `resume()` or `AbortSignal`. The pause source can be either:
 
-1. **Breakpoint pause**: caused by a registered `setBreakpoint(stage, condition?)` matching the current stage and condition, or a `pause()` call.
-2. **Agent completes naturally**: an unconditional breakpoint on `complete` always fires at loop termination.
+1. **Breakpoint match**: a registered `setBreakpoint(stage, condition?)` matches the current stage.
+2. **Explicit pause**: a `pause()` call from a subscriber, which takes effect at the next stage boundary.
+
+An unconditional breakpoint on `complete` always fires on every run termination path that emits `agent_end`, including normal completion, abort, and `maxIterations`.
 
 Only one pause is active at a time. Calling `pause()` when already paused is a no-op. Calling `resume()` when not paused is a no-op.
 
@@ -127,6 +133,8 @@ agent.clearAllBreakpoints(); // remove all breakpoints
 ### Error during pause
 
 If the abort signal fires while paused, the loop terminates cleanly with `agent_end` carrying the reason `"aborted"`.
+
+If a subscriber's listener throws while pause is triggered, the error propagates up the call stack, aborting the current run. This is consistent with the existing event listener error behavior.
 
 ## Success criteria
 
@@ -156,11 +164,10 @@ If the abort signal fires while paused, the loop terminates cleanly with `agent_
 
 ### Edge cases
 
-16. Multiple listeners subscribing to `onBreakpoint` receive the same hit data
-17. Setting a breakpoint on an already-paused stage does not trigger until next iteration
-18. Aborting while paused produces clean `agent_end` — no dangling state
-19. Calling `pause()` inside `agent_end` listener is a no-op (loop already done)
-20. Conditional breakpoints receive the current tool list and messages at evaluation time
+16. Setting a breakpoint on an already-paused stage does not trigger until next iteration
+17. Aborting while paused produces clean `agent_end` — no dangling state
+18. Calling `pause()` inside `agent_end` listener is a no-op (loop already done)
+19. Conditional breakpoints receive the current tool list and messages at evaluation time
 
 ## Validation
 
@@ -201,5 +208,3 @@ If the abort signal fires while paused, the loop terminates cleanly with `agent_
 2. **Thread-safety of `pause()`/`resume()`**: Is calling `pause()` from an event listener (which is awaited synchronously) sufficiently safe, or should pause/resume be Promise-based to support async breakpoint handlers?
 
 3. **Should pre_stream have access to the prepared LLM request payload?** The context at `pre_stream` is the `AgentContext` before conversion. Should we also expose the computed `llmMessages` (after convertToLlm + system prompt prep) for richer conditional logic?
-
-4. **What is the expected behavior if a subscriber's listener throws when pause is triggered?** Should the pause still happen, or should the error propagate and abort? (Current design: error propagates and aborts.)

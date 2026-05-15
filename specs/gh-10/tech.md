@@ -105,16 +105,18 @@ export interface BreakpointHit {
 ### BreakpointManager class (packages/agent/src/breakpoint-manager.ts)
 
 ```typescript
-import type { Breakpoint, BreakpointStage, BreakpointCondition, BreakpointHit } from "./types.js";
+import type { BreakpointStage, BreakpointCondition } from "./types.js";
+
+type Unconditional = null;
 
 export class BreakpointManager {
-  private breakpoints = new Map<BreakpointStage, BreakpointCondition | undefined>();
+  private breakpoints = new Map<BreakpointStage, BreakpointCondition | Unconditional>();
   private paused = false;
   private resumePromise?: Promise<void>;
   private resumeResolve?: () => void;
 
   setBreakpoint(stage: BreakpointStage, condition?: BreakpointCondition): void {
-    this.breakpoints.set(stage, condition);
+    this.breakpoints.set(stage, condition ?? null);
   }
 
   clearBreakpoint(stage: BreakpointStage): void {
@@ -154,35 +156,14 @@ export class BreakpointManager {
    * Returns true if execution should pause.
    */
   shouldPauseAt(stage: BreakpointStage, context: AgentContext): boolean {
-    const condition = this.breakpoints.get(stage);
-    if (condition === undefined) return false; // no breakpoint set
-    if (condition === null) return true; // unconditional (stored as undefined in map)
-    // Wait — need to distinguish "not set" from "unconditional"
-    // Revisit: use a sentinel or just always require condition
-    if (!condition) return true; // unconditional: no condition function
-    return condition(context);
+    if (!this.paused) {
+      const condition = this.breakpoints.get(stage);
+      if (condition === undefined) return false; // not set
+      if (condition === null) return true; // unconditional
+      return condition(context);
+    }
+    return true; // already paused — stay paused
   }
-}
-```
-
-**Note**: The `shouldPauseAt` logic needs to distinguish between "no breakpoint at this stage" and "unconditional breakpoint at this stage". The sentinel approach: don't store `undefined` for unset — use a separate check. Refine the implementation to store `undefined` as a real value by using an explicit sentinel:
-
-```typescript
-type Unconditional = null;
-private breakpoints = new Map<BreakpointStage, BreakpointCondition | Unconditional>();
-
-setBreakpoint(stage: BreakpointStage, condition?: BreakpointCondition): void {
-  this.breakpoints.set(stage, condition ?? null);
-}
-
-shouldPauseAt(stage: BreakpointStage, context: AgentContext): boolean {
-  if (!this.paused) {
-    const condition = this.breakpoints.get(stage);
-    if (condition === undefined) return false; // not set
-    if (condition === null) return true; // unconditional
-    return condition(context);
-  }
-  return true; // already paused — stay paused
 }
 ```
 
@@ -314,6 +295,8 @@ beforeStage?: (
 ) => Promise<void> | void;
 ```
 
+`beforeStage("pre_tool")` fires at the stage boundary before `executeToolCalls` begins, while `beforeToolCall` fires immediately before an individual tool is executed. Both can be active simultaneously — `beforeStage("pre_tool")` runs first, then the tool-execution loop begins, and `beforeToolCall` runs for each tool. The same ordering applies for `afterToolCall` (per-tool) and `afterStage("post_tool")` (stage boundary after all tools complete).
+
 Then implement `beforeStage` in the Agent's `createLoopConfig()`:
 
 ```typescript
@@ -326,7 +309,7 @@ createLoopConfig(): AgentLoopConfig {
         await this.onBreakpoint?.({
           stage,
           context,
-          snapshot: this.state,
+          snapshot: this.createStateSnapshot(),
         });
       }
       // Wait for resume or abort
@@ -378,13 +361,18 @@ async function loop(
     }
   };
 
+  const finishRun = async () => {
+    await checkStage("complete");
+    await emit({ type: "agent_end", messages: messages.slice() });
+  };
+
   for (;;) {
     if (signal.aborted) {
-      await emit({ type: "agent_end", messages: messages.slice() });
+      await finishRun();
       return;
     }
     if (maxIterations !== undefined && ++iterationCount > maxIterations) {
-      await emit({ type: "agent_end", messages: messages.slice() });
+      await finishRun();
       return;
     }
 
@@ -422,7 +410,7 @@ async function loop(
     // === STAGE 1: pre_stream ===
     await checkStage("pre_stream");
     if (signal.aborted) {
-      await emit({ type: "agent_end", messages: messages.slice() });
+      await finishRun();
       return;
     }
 
@@ -441,10 +429,16 @@ async function loop(
 
     const result = await collectStreamIntoMessage(eventStream, wrapperEmit, signal);
 
-    if (!result) return; // aborted
+    // While paused at `streaming`, `wrapperEmit` blocks `collectStreamIntoMessage`'s
+    // `for await` loop. This applies natural backpressure to the LLM stream — the
+    // HTTP connection stays open and events buffer at the transport layer. For
+    // pause durations under typical HTTP timeouts (~30-60s), no special handling
+    // is needed. Persistent pauses here should be avoided in production.
 
-    // === STAGE 3: post_stream ===
-    await checkStage("post_stream");
+    if (!result) {
+      await finishRun();
+      return;
+    }
 
     const assistantMessage: AgentMessage = {
       role: "assistant",
@@ -452,6 +446,10 @@ async function loop(
     };
 
     await emit({ type: "message_end", message: assistantMessage });
+
+    // === STAGE 3: post_stream ===
+    await checkStage("post_stream");
+
     messages.push(assistantMessage);
 
     // If no tool calls or error, check for follow-ups then exit
@@ -463,6 +461,9 @@ async function loop(
       result.stopReason !== "aborted";
 
     if (isStop || !hasToolCalls) {
+      // === STAGE 7: pre_followup ===
+      await checkStage("pre_followup");
+
       // Drain follow-up queue
       const followUps = await config.getFollowUpMessages();
       if (followUps.length > 0) {
@@ -470,15 +471,12 @@ async function loop(
         continue;
       }
 
-      // === STAGE 8: complete (before return) ===
-      await checkStage("complete");
-      await emit({ type: "agent_end", messages: messages.slice() });
+      await finishRun();
       return;
     }
 
     if (result.errorMessage) {
-      await checkStage("complete");
-      await emit({ type: "agent_end", messages: messages.slice() });
+      await finishRun();
       return;
     }
 
@@ -486,13 +484,15 @@ async function loop(
     await checkStage("pre_tool");
 
     // Execute tool calls
-    const toolResults = await executeToolCallsStageChecked(
+    const toolResults = await executeToolCalls(
       result.toolCalls,
       context.tools,
       config,
       emit,
       signal,
-      checkStage,
+      async () => {
+        await checkStage("tool_exec");
+      },
     );
 
     for (const tr of toolResults) {
@@ -503,6 +503,9 @@ async function loop(
 
     // === STAGE 6: post_tool ===
     await checkStage("post_tool");
+
+    // === STAGE 7: pre_followup ===
+    await checkStage("pre_followup");
 
     // Check for steering messages
     const steering = await config.getSteeringMessages();
@@ -519,7 +522,7 @@ async function loop(
 }
 ```
 
-The `executeToolCallsStageChecked` variant adds the `tool_exec` check before each tool. For minimal diff, modify `executeToolCalls()` to accept an optional `onToolExec` callback:
+The `tool_exec` checkpoint is evaluated in a serialized preflight pass before each tool promise is started. That keeps parallel tool execution from racing breakpoint waits while preserving parallel tool work after the checkpoint clears. For minimal diff, modify `executeToolCalls()` to accept an optional `onToolExec` callback:
 
 ```typescript
 async function executeToolCalls(
@@ -530,8 +533,8 @@ async function executeToolCalls(
   signal: AbortSignal,
   onToolExec?: (context: ToolExecutionContext) => Promise<void>,
 ): Promise<AgentMessage[]> {
-  // In the per-tool execute() function:
-  // Before calling toolDef.execute():
+  // This callback is invoked from the serialized preflight pass.
+  // It runs before toolDef.execute() starts.
   if (onToolExec) {
     await onToolExec({ toolName: toolCall.name, args, toolCallId: toolCall.id });
   }
@@ -548,7 +551,9 @@ const toolResults = await executeToolCalls(
   config,
   emit,
   signal,
-  config.beforeStage ? async () => await checkStage("tool_exec") : undefined,
+  async () => {
+    await checkStage("tool_exec");
+  },
 );
 ```
 
@@ -636,19 +641,19 @@ User: await agent.prompt("Execute dangerous command")
 
 **Problem**: If `AbortSignal` fires while the loop is blocked on `resumeWait`, the loop must exit cleanly.
 
-**Mitigation**: `checkStage` wraps `resumeWait` with a `Promise.race` against abort. The abort listener rejects the race, and the loop checks `signal.aborted` immediately after `checkStage` returns, then emits `agent_end` and exits. Residual `abort` listeners should be cleaned up after the race.
+**Mitigation**: `checkStage` waits on `resumeWait` and the abort signal without throwing. If abort wins the race, the loop returns through its normal `finishRun()` path so `complete` still runs before `agent_end`.
 
 ### Risk 3: Tool execution mode and partial pause
 
 **Problem**: In parallel tool execution mode (`toolExecution === "parallel"`), pausing at `tool_exec` for one tool while others are in flight creates an inconsistent state.
 
-**Mitigation**: The `tool_exec` check is placed _before_ individual tool execution starts, not between tools. In parallel mode, the check is hit for each tool sequentially as the `Promise.all` iteration advances. This is acceptable for a coarse-grained breakpoint system.
+**Mitigation**: The `tool_exec` checkpoint is evaluated in a serialized preflight pass before each tool promise is started. In parallel mode, the tools can still execute concurrently after they clear the gate, but only one tool can pause at the gate at a time.
 
 ### Risk 4: State snapshot correctness
 
-**Problem**: `AgentState` is an immutable-like snapshot but `MutableAgentState` uses getters/setters that reference live arrays. `this.state` returns the mutable internal state, so a snapshot might mutate after being captured.
+**Problem**: `AgentState` is an immutable-like snapshot but `MutableAgentState` uses getters/setters that reference live arrays. Passing `this.state` directly would expose mutable references that can change after the snapshot is captured.
 
-**Mitigation**: In the `onBreakpoint` snapshot, pass `this.state` directly (it's a getter returning current values). Document that the snapshot is a point-in-time view and may become stale. For true immutability, deep-slice `messages` and `tools` in the snapshot, but keep it simple for the initial implementation.
+**Mitigation**: Implement `createStateSnapshot()` on `Agent` that returns a deep-cloned `AgentState`: copy `messages` with `messages.slice()`, copy `tools` with `tools.slice()`, and copy any other array/object fields. The `snapshot` in `BreakpointHit` must be a true point-in-time copy, not a live reference.
 
 ### Risk 5: Infinite loop if `resume()` is called before `checkStage`
 
@@ -674,8 +679,7 @@ Add `breakpoint.test.ts`:
 - `turn_end` message transcript is identical with and without breakpoints
 - Parallel tool execution with breakpoints — each tool_exec check runs without race conditions
 - Abort during pause emits clean `agent_end` with `stopReason: "aborted"`
-- `complete` stage fires exactly once when agent finishes normally
-- `agent_end` emitted before `complete` stage check? Or after? Verify ordering
+- `complete` stage fires exactly once when agent finishes normally, immediately before `agent_end`
 
 ### Regression tests
 
