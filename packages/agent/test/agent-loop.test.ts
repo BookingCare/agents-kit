@@ -1,23 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { agentLoop } from "../src/agent-loop.js";
 import { createToolDispatch } from "../src/tools.js";
-import { getModel } from "@bookingcare/ai";
-import { applyAuth } from "./helpers/auth.js";
+import { auth, liveModel as getLiveModel } from "./helpers/live-model.js";
+
 import type { StreamResult } from "@bookingcare/ai";
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
-
-const auth = applyAuth();
-
-const model = () => getModel("gpt-5.4-nano")!;
 
 // --- s01: Agent loop basics (bash only) ---
 
 describe.skipIf(!auth)("agentLoop e2e", () => {
   it("answers a simple question without tools", async () => {
     const { messages, iterations } = await agentLoop("What is 2+2? Reply with just the number.", {
-      model: model(),
+      model: getLiveModel(),
     });
 
     expect(iterations).toBe(1);
@@ -33,7 +29,7 @@ describe.skipIf(!auth)("agentLoop e2e", () => {
   it("uses bash tool to list files", async () => {
     const { messages, iterations } = await agentLoop(
       "List all .ts files in the current directory using bash. Reply with just the filenames.",
-      { model: model() },
+      { model: getLiveModel() },
     );
 
     expect(iterations).toBeGreaterThanOrEqual(2);
@@ -49,7 +45,7 @@ describe.skipIf(!auth)("agentLoop e2e", () => {
     try {
       const { messages, iterations } = await agentLoop(
         "Use bash to create a file called test.txt in the workspace with the content 'hello from agent loop'. Run: echo 'hello from agent loop' > test.txt",
-        { model: model(), workdir },
+        { model: getLiveModel(), workdir },
       );
 
       expect(iterations).toBeGreaterThanOrEqual(2);
@@ -68,7 +64,7 @@ describe.skipIf(!auth)("agentLoop e2e", () => {
     try {
       const { messages, iterations } = await agentLoop(
         "Create 3 files in the workspace: a.txt containing 'a', b.txt containing 'b', c.txt containing 'c'. Use bash to run: mkdir -p subdir && echo a > subdir/a.txt && echo b > subdir/b.txt && echo c > subdir/c.txt",
-        { model: model(), workdir },
+        { model: getLiveModel(), workdir },
       );
 
       expect(iterations).toBeGreaterThanOrEqual(2);
@@ -80,7 +76,7 @@ describe.skipIf(!auth)("agentLoop e2e", () => {
 
   it("respects maxIterations limit", async () => {
     const { iterations } = await agentLoop("Keep running 'echo hello' over and over forever.", {
-      model: model(),
+      model: getLiveModel(),
       maxIterations: 3,
     });
 
@@ -91,7 +87,7 @@ describe.skipIf(!auth)("agentLoop e2e", () => {
     const { messages } = await agentLoop(
       "What is the current git branch? Use bash to run: git branch --show-current. Reply with just the branch name.",
       {
-        model: model(),
+        model: getLiveModel(),
         workdir: resolve(import.meta.dirname, "../../.."),
       },
     );
@@ -105,7 +101,7 @@ describe.skipIf(!auth)("agentLoop e2e", () => {
     const results: { result: StreamResult; iteration: number }[] = [];
 
     await agentLoop("What is 2+2? Reply with just the number.", {
-      model: model(),
+      model: getLiveModel(),
       onStreamResult: (result, iteration) => {
         results.push({ result, iteration });
       },
@@ -118,7 +114,7 @@ describe.skipIf(!auth)("agentLoop e2e", () => {
 
   it("respects system prompt", async () => {
     const { messages } = await agentLoop("What is your name?", {
-      model: model(),
+      model: getLiveModel(),
       system: "You are a helpful assistant named TestBot. Always introduce yourself as TestBot.",
     });
 
@@ -149,7 +145,7 @@ describe.skipIf(!auth)("tool dispatch e2e", () => {
   it("creates a file with write_file", async () => {
     const { messages, iterations } = await agentLoop(
       "Create a file called greet.py with a greet(name) function that returns a greeting string.",
-      { model: model(), workdir },
+      { model: getLiveModel(), workdir },
     );
 
     expect(iterations).toBeGreaterThanOrEqual(2);
@@ -165,7 +161,7 @@ describe.skipIf(!auth)("tool dispatch e2e", () => {
     const { messages } = await agentLoop(
       "Read the file data.txt and tell me how many lines it has.",
       {
-        model: model(),
+        model: getLiveModel(),
         workdir,
       },
     );
@@ -185,7 +181,7 @@ describe.skipIf(!auth)("tool dispatch e2e", () => {
 
     const { messages } = await agentLoop(
       'Edit greet.py to change the greeting from "Hello" to "Hi".',
-      { model: model(), workdir },
+      { model: getLiveModel(), workdir },
     );
 
     expect(messages.some((m) => m.role === "toolResult")).toBe(true);
@@ -198,7 +194,7 @@ describe.skipIf(!auth)("tool dispatch e2e", () => {
   it("reads after write to verify content", async () => {
     const { messages } = await agentLoop(
       "Create a file called notes.txt with the content 'my secret notes', then read it back to verify.",
-      { model: model(), workdir },
+      { model: getLiveModel(), workdir },
     );
 
     const toolResults = messages.filter((m) => m.role === "toolResult");
@@ -237,7 +233,7 @@ describe.skipIf(!auth)("skill loading e2e", () => {
     const { messages, iterations } = await agentLoop(
       "Load the greeter skill and follow its instructions to greet the user named Alice.",
       {
-        model: model(),
+        model: getLiveModel(),
         skillsDir,
       },
     );
@@ -265,7 +261,7 @@ describe.skipIf(!auth)("skill loading e2e", () => {
 
   it("works without skills dir (backward compatible)", async () => {
     const { messages, iterations } = await agentLoop("What is 1+1? Reply with just the number.", {
-      model: model(),
+      model: getLiveModel(),
     });
 
     expect(iterations).toBe(1);
@@ -330,7 +326,7 @@ describe.skipIf(!auth)("todo tracking e2e", () => {
   it("uses todo tool to plan a multi-step task", async () => {
     const { messages, iterations } = await agentLoop(
       "Create a plan with 3 tasks: plan, code, test. Use the todo tool to create the list.",
-      { model: model() },
+      { model: getLiveModel() },
     );
 
     expect(iterations).toBeGreaterThanOrEqual(2);
@@ -353,7 +349,7 @@ describe.skipIf(!auth)("todo tracking e2e", () => {
     const { messages } = await agentLoop(
       "Create a todo list with 2 tasks: 'write code' and 'write tests'. " +
         "Then mark 'write code' as in_progress, then completed. Use the todo tool for each step.",
-      { model: model() },
+      { model: getLiveModel() },
     );
 
     const todoResults = messages.filter((m) => m.role === "toolResult" && m.toolName === "todo");

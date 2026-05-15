@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TodoManager } from "../src/todo-manager.js";
+import { TodoManager } from "../../src/todo-manager.js";
 
 describe("TodoManager", () => {
   describe("update", () => {

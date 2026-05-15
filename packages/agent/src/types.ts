@@ -100,6 +100,24 @@ export interface AgentLoopTurnUpdate {
   systemPrompt?: string;
 }
 
+export type BreakpointStage =
+  | "pre_stream"
+  | "streaming"
+  | "post_stream"
+  | "pre_tool"
+  | "tool_exec"
+  | "post_tool"
+  | "pre_followup"
+  | "complete";
+
+export type BreakpointCondition = (context: AgentContext) => boolean;
+
+export interface BreakpointHit {
+  stage: BreakpointStage;
+  context: AgentContext;
+  snapshot: AgentState;
+}
+
 export interface AgentLoopConfig {
   model: Model<Api>;
   maxTokens?: number;
@@ -111,6 +129,7 @@ export interface AgentLoopConfig {
   thinkingBudgets?: unknown;
   maxRetryDelayMs?: number;
   toolExecution: ToolExecutionMode;
+  beforeStage?: (stage: BreakpointStage, context: AgentContext) => Promise<void> | void;
   beforeToolCall?: (
     context: BeforeToolCallContext,
     signal?: AbortSignal,

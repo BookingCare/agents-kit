@@ -13,11 +13,13 @@ import type {
 import { streamSimple, Type } from "@bookingcare/ai";
 import { createToolDispatch } from "./tools.js";
 import type {
+  AgentContext,
   AgentEvent,
   AgentLoopConfig,
   AgentLoopOptions,
   AgentMessage,
   AgentTool,
+  BreakpointStage,
   StreamFn,
   StreamingAssistantMessage,
 } from "./types.js";
@@ -251,13 +253,41 @@ async function loop(
 ): Promise<void> {
   let iterationCount = 0;
 
+  const buildStageContext = (): AgentContext => ({
+    systemPrompt: context.systemPrompt,
+    messages: structuredClone(messages),
+    tools: context.tools.map((tool) => ({ ...tool })),
+  });
+
+  const checkStage = async (stage: BreakpointStage): Promise<void> => {
+    if (!config.beforeStage) {
+      return;
+    }
+
+    await config.beforeStage(stage, buildStageContext());
+  };
+
+  const finishRun = async (): Promise<void> => {
+    await checkStage("complete");
+    await emit({ type: "agent_end", messages: messages.slice() });
+  };
+
+  const finishRunIfAborted = async (): Promise<boolean> => {
+    if (!signal.aborted) {
+      return false;
+    }
+
+    await finishRun();
+    return true;
+  };
+
   for (;;) {
     if (signal.aborted) {
-      await emit({ type: "agent_end", messages: messages.slice() });
+      await finishRun();
       return;
     }
     if (maxIterations !== undefined && ++iterationCount > maxIterations) {
-      await emit({ type: "agent_end", messages: messages.slice() });
+      await finishRun();
       return;
     }
 
@@ -316,11 +346,28 @@ async function loop(
     // Collect tools in Tool[] format — AgentTool extends Tool so spread works directly
     const tools: Tool[] = context.tools;
 
+    await checkStage("pre_stream");
+    if (signal.aborted) {
+      await finishRun();
+      return;
+    }
+
     // Stream the assistant response
     const eventStream = streamFn(config.model, { messages: llmMessages, tools }, options);
-    const result = await collectStreamIntoMessage(eventStream, emit, signal);
+    let streamingStageChecked = false;
+    const emitWithBreakpoint = async (event: AgentEvent): Promise<void> => {
+      if (event.type === "message_start" && !streamingStageChecked) {
+        streamingStageChecked = true;
+        await checkStage("streaming");
+      }
+      await emit(event);
+    };
+    const result = await collectStreamIntoMessage(eventStream, emitWithBreakpoint, signal);
 
-    if (!result) return; // aborted
+    if (!result) {
+      await finishRun();
+      return;
+    }
 
     const assistantMessage: AgentMessage = {
       role: "assistant",
@@ -343,6 +390,10 @@ async function loop(
 
     await emit({ type: "message_end", message: assistantMessage });
     messages.push(assistantMessage);
+    await checkStage("post_stream");
+    if (await finishRunIfAborted()) {
+      return;
+    }
 
     // If no tool calls or error, check for follow-ups then exit
     const hasToolCalls = result.toolCalls.length > 0;
@@ -353,6 +404,11 @@ async function loop(
       result.stopReason !== "aborted";
 
     if (isStop || !hasToolCalls) {
+      await checkStage("pre_followup");
+      if (await finishRunIfAborted()) {
+        return;
+      }
+
       // Drain follow-up queue
       const followUps = await config.getFollowUpMessages();
       if (followUps.length > 0) {
@@ -360,12 +416,17 @@ async function loop(
         continue;
       }
 
-      await emit({ type: "agent_end", messages: messages.slice() });
+      await finishRun();
       return;
     }
 
     if (result.errorMessage) {
-      await emit({ type: "agent_end", messages: messages.slice() });
+      await finishRun();
+      return;
+    }
+
+    await checkStage("pre_tool");
+    if (await finishRunIfAborted()) {
       return;
     }
 
@@ -376,13 +437,29 @@ async function loop(
       config,
       emit,
       signal,
+      async () => {
+        await checkStage("tool_exec");
+      },
     );
+
+    if (await finishRunIfAborted()) {
+      return;
+    }
 
     for (const tr of toolResults) {
       messages.push(tr);
     }
 
     await emit({ type: "turn_end", message: assistantMessage, toolResults });
+    await checkStage("post_tool");
+    if (await finishRunIfAborted()) {
+      return;
+    }
+
+    await checkStage("pre_followup");
+    if (await finishRunIfAborted()) {
+      return;
+    }
 
     // Check for steering messages
     const steering = await config.getSteeringMessages();
@@ -512,16 +589,19 @@ async function executeToolCalls(
   config: AgentLoopConfig,
   emit: (event: AgentEvent) => Promise<void>,
   signal: AbortSignal,
+  beforeToolExecute?: () => Promise<void>,
 ): Promise<AgentMessage[]> {
   const results: AgentMessage[] = [];
   const toolMap = new Map(tools.map((t) => [t.name, t] as [string, AgentTool]));
 
-  const execute = async (toolCall: ToolCall): Promise<AgentMessage> => {
+  type PreparedToolExecution =
+    | { kind: "skip"; result: AgentMessage }
+    | { kind: "run"; run: () => Promise<AgentMessage> };
+
+  const prepare = async (toolCall: ToolCall): Promise<PreparedToolExecution> => {
     let args = toolCall.arguments as Record<string, unknown>;
-    // Resolve tool, prepare arguments, execute
     const toolDef = toolMap.get(toolCall.name);
 
-    // Before hook
     if (config.beforeToolCall) {
       const before = await config.beforeToolCall(
         { toolName: toolCall.name, args, toolCallId: toolCall.id },
@@ -530,12 +610,15 @@ async function executeToolCalls(
       if (before) {
         if (before.action === "skip") {
           return {
-            role: "toolResult",
-            toolCallId: toolCall.id,
-            toolName: toolCall.name,
-            content: [{ type: "text" as const, text: before.result ?? "" }],
-            isError: false,
-            timestamp: Date.now(),
+            kind: "skip",
+            result: {
+              role: "toolResult",
+              toolCallId: toolCall.id,
+              toolName: toolCall.name,
+              content: [{ type: "text" as const, text: before.result ?? "" }],
+              isError: false,
+              timestamp: Date.now(),
+            },
           };
         }
         if (before.action === "replace") {
@@ -544,48 +627,70 @@ async function executeToolCalls(
       }
     }
 
-    await emit({ type: "tool_execution_start", toolCallId: toolCall.id });
-
-    let output: string;
-    let isError = false;
-
-    if (toolDef) {
-      try {
-        const prepared = toolDef.prepareArguments
-          ? toolDef.prepareArguments(args)
-          : (args as Static<typeof toolDef.parameters>);
-        const result = await toolDef.execute(toolCall.id, prepared, signal);
-        output = result.content;
-        isError = result.isError ?? false;
-      } catch (e) {
-        output = `Error: ${(e as Error).message}`;
-        isError = true;
-      }
-    } else {
-      output = `Unknown tool: ${toolCall.name}`;
-      isError = true;
+    if (beforeToolExecute) {
+      await beforeToolExecute();
     }
 
-    // After hook
-    if (config.afterToolCall) {
-      const after = await config.afterToolCall(
-        { toolName: toolCall.name, args, toolCallId: toolCall.id, result: output },
-        signal,
-      );
-      if (after && after.action === "replace") {
-        output = after.result;
-      }
+    if (signal.aborted) {
+      return {
+        kind: "skip",
+        result: {
+          role: "toolResult",
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          content: [{ type: "text" as const, text: "" }],
+          isError: false,
+          timestamp: Date.now(),
+        },
+      };
     }
-
-    await emit({ type: "tool_execution_end", toolCallId: toolCall.id });
 
     return {
-      role: "toolResult",
-      toolCallId: toolCall.id,
-      toolName: toolCall.name,
-      content: [{ type: "text" as const, text: output }],
-      isError,
-      timestamp: Date.now(),
+      kind: "run",
+      run: async (): Promise<AgentMessage> => {
+        await emit({ type: "tool_execution_start", toolCallId: toolCall.id });
+
+        let output: string;
+        let isError = false;
+
+        if (toolDef) {
+          try {
+            const prepared = toolDef.prepareArguments
+              ? toolDef.prepareArguments(args)
+              : (args as Static<typeof toolDef.parameters>);
+            const result = await toolDef.execute(toolCall.id, prepared, signal);
+            output = result.content;
+            isError = result.isError ?? false;
+          } catch (e) {
+            output = `Error: ${(e as Error).message}`;
+            isError = true;
+          }
+        } else {
+          output = `Unknown tool: ${toolCall.name}`;
+          isError = true;
+        }
+
+        if (config.afterToolCall) {
+          const after = await config.afterToolCall(
+            { toolName: toolCall.name, args, toolCallId: toolCall.id, result: output },
+            signal,
+          );
+          if (after && after.action === "replace") {
+            output = after.result;
+          }
+        }
+
+        await emit({ type: "tool_execution_end", toolCallId: toolCall.id });
+
+        return {
+          role: "toolResult",
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          content: [{ type: "text" as const, text: output }],
+          isError,
+          timestamp: Date.now(),
+        };
+      },
     };
   };
 
@@ -598,10 +703,27 @@ async function executeToolCalls(
   if (config.toolExecution === "sequential" || hasSequential) {
     for (const tc of toolCalls) {
       if (signal.aborted) break;
-      results.push(await execute(tc));
+      const prepared = await prepare(tc);
+      if (prepared.kind === "skip") {
+        results.push(prepared.result);
+        continue;
+      }
+      results.push(await prepared.run());
     }
   } else {
-    const settled = await Promise.all(toolCalls.map(execute));
+    const prepared = [] as PreparedToolExecution[];
+    for (const tc of toolCalls) {
+      if (signal.aborted) break;
+      prepared.push(await prepare(tc));
+    }
+
+    if (signal.aborted) {
+      return results;
+    }
+
+    const settled = await Promise.all(
+      prepared.map((item) => (item.kind === "skip" ? item.result : item.run())),
+    );
     results.push(...settled);
   }
 

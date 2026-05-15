@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { SkillLoader } from "../src/skill-loader.js";
+import { SkillLoader } from "../../src/skill-loader.js";
 import { resolve } from "node:path";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
-const FIXTURES = resolve(import.meta.dirname, "fixtures/skills");
+const FIXTURES = resolve(import.meta.dirname, "../fixtures/skills");
 
 // --- Unit tests ---
 

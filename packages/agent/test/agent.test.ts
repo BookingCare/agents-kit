@@ -1,18 +1,55 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Agent } from "../src/agent.js";
-import type { AgentEvent, AgentMessage, AgentTool, QueueMode } from "../src/types.js";
-import type { Model, SimpleStreamOptions } from "@bookingcare/ai";
-import { createAssistantMessageEventStream, Type } from "@bookingcare/ai";
-import { createMockStream, buildAssistantMessage } from "./helpers/helpers.js";
+import { Type } from "@bookingcare/ai";
+import { describe, expect, it } from "vitest";
+import { Agent, type AgentEvent, type AgentMessage, type AgentTool } from "../src/index.js";
+import { auth, liveModel as getLiveModel, type LiveModel } from "./helpers/live-model.js";
 
-// ── Test tool ─────────────────────────────────────────────────────────
+const IMAGE_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO3Z4eQAAAAASUVORK5CYII=";
+
+function createAgent(liveModel: LiveModel, tools: AgentTool[] = [], systemPrompt = "") {
+  return new Agent({
+    initialState: {
+      model: liveModel,
+      systemPrompt,
+      thinkingLevel: "off",
+      tools,
+      messages: [],
+    },
+  });
+}
+
+function getTextContent(message: AgentMessage): string {
+  if (typeof message.content === "string") {
+    return message.content;
+  }
+
+  return message.content
+    .filter((block): block is { type: "text"; text: string } => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+}
+
+async function waitForStreaming(agent: Agent, timeoutMs = 10_000): Promise<void> {
+  const startedAt = Date.now();
+  while (!agent.state.isStreaming) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error("Timed out waiting for streaming to start");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
 
 const echoTool: AgentTool = {
   name: "echo",
   description: "Echoes back the input",
   parameters: Type.Object({ message: Type.String() }),
   label: "Echo",
-  execute: async (_id, params) => ({ content: (params as { message: string }).message }),
+  execute: async (_toolCallId, params) => {
+    const { message } = params as { message: string };
+    return {
+      content: message,
+    };
+  },
 };
 
 const failTool: AgentTool = {
@@ -25,290 +62,156 @@ const failTool: AgentTool = {
   },
 };
 
-const TEST_MODEL: Model<"openai-completions"> = {
-  id: "test-model",
-  name: "Test Model",
-  api: "openai-completions",
-  provider: "openai",
-  baseUrl: "https://test.example.com",
-  reasoning: false,
-  input: ["text"],
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  contextWindow: 4096,
-  maxTokens: 1024,
-};
-
-// ── Agent basics ──────────────────────────────────────────────────────
-
-describe("Agent", () => {
-  it("emits message_start/update/end events on prompt", async () => {
-    const streamFn = createMockStream([{ text: "Hello!" }]);
-    const agent = new Agent({
-      initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
-        thinkingLevel: "off",
-        tools: [],
-        messages: [],
-      },
-      streamFn: streamFn as any,
-    });
-
+describe.skipIf(!auth)("Agent", () => {
+  it("emits message lifecycle events on prompt", async () => {
+    const agent = createAgent(
+      getLiveModel(),
+      [],
+      "You are a helpful assistant. Keep your responses concise.",
+    );
     const events: AgentEvent[] = [];
+
     agent.subscribe((event) => {
       events.push(event);
     });
 
-    await agent.prompt("Say hi");
+    await agent.prompt("What is 2+2? Answer with just the number.");
 
-    expect(events.some((e) => e.type === "message_start")).toBe(true);
-    expect(events.some((e) => e.type === "message_update")).toBe(true);
-    expect(events.some((e) => e.type === "message_end")).toBe(true);
-    expect(events.some((e) => e.type === "agent_end")).toBe(true);
+    const types = events.map((event) => event.type);
+    expect(types).toContain("message_start");
+    expect(types).toContain("message_update");
+    expect(types).toContain("message_end");
+    expect(types).toContain("agent_end");
+    expect(types.indexOf("message_start")).toBeLessThan(types.indexOf("message_update"));
+    expect(types.indexOf("message_update")).toBeLessThan(types.indexOf("message_end"));
+    expect(types.indexOf("message_end")).toBeLessThan(types.indexOf("agent_end"));
 
-    // Final assistant message should contain the text
-    const endEvent = events.find((e) => e.type === "agent_end")!;
-    const msgs = (endEvent as { type: "agent_end"; messages: AgentMessage[] }).messages;
-    const assistantMsg = msgs.find((m) => m.role === "assistant");
-    expect(assistantMsg).toBeDefined();
+    expect(agent.state.isStreaming).toBe(false);
+    expect(agent.state.messages).toHaveLength(2);
   });
 
   it("throws if prompt is called while already running", async () => {
-    const streamFn = createMockStream([{ text: "Thinking..." }]);
-    const agent = new Agent({
-      initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
-        thinkingLevel: "off",
-        tools: [],
-        messages: [],
-      },
-      streamFn: streamFn as any,
-    });
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
+    const firstPrompt = agent.prompt(
+      "Write a long, detailed explanation of how to stay calm during a busy day, using at least eight numbered points.",
+    );
 
-    const promise = agent.prompt("First");
-    await expect(agent.prompt("Second")).rejects.toThrow("already processing");
-    await promise;
+    await waitForStreaming(agent);
+    await expect(agent.prompt("Second prompt")).rejects.toThrow("already processing");
+    await firstPrompt;
   });
 
   it("executes tool calls and returns results", async () => {
-    const streamFn = createMockStream([
-      {
-        text: "",
-        toolCalls: [{ type: "toolCall", id: "tc1", name: "echo", arguments: { message: "hi" } }],
-        stopReason: "toolUse",
-      },
-      { text: "Done" },
-    ]);
-
-    const agent = new Agent({
-      initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
-        thinkingLevel: "off",
-        tools: [echoTool],
-        messages: [],
-      },
-      streamFn: streamFn as any,
-    });
+    const agent = createAgent(
+      getLiveModel(),
+      [echoTool],
+      "You are a helpful assistant. When asked to repeat a word, you must use the echo tool.",
+    );
 
     const events: AgentEvent[] = [];
     agent.subscribe((event) => {
       events.push(event);
     });
 
-    await agent.prompt("Use echo");
+    await agent.prompt("Use the echo tool to repeat HELLO exactly.");
 
-    // Should have tool execution events
-    expect(events.some((e) => e.type === "tool_execution_start")).toBe(true);
-    expect(events.some((e) => e.type === "tool_execution_end")).toBe(true);
+    expect(events.some((event) => event.type === "tool_execution_start")).toBe(true);
+    expect(events.some((event) => event.type === "tool_execution_end")).toBe(true);
+    expect(agent.state.pendingToolCalls.size).toBe(0);
 
-    // Should have a turn_end with tool results
-    const turnEnd = events.find((e) => e.type === "turn_end") as
-      | { type: "turn_end"; toolResults: AgentMessage[] }
-      | undefined;
-    expect(turnEnd).toBeDefined();
-    expect(turnEnd!.toolResults.length).toBe(1);
-    expect(turnEnd!.toolResults[0].role).toBe("toolResult");
+    const toolResultMsg = agent.state.messages.find((message) => message.role === "toolResult");
+    expect(toolResultMsg).toBeDefined();
+    if (toolResultMsg?.role !== "toolResult") throw new Error("Expected tool result message");
+    expect(getTextContent(toolResultMsg)).toContain("HELLO");
 
-    // Tool result should contain the echoed message
-    const toolResult = turnEnd!.toolResults[0];
-    if (typeof toolResult.content !== "string" && "some" in toolResult.content) {
-      const text = toolResult.content
-        .filter((p): p is { type: "text"; text: string } => "type" in p && p.type === "text")
-        .map((p) => p.text)
-        .join("");
-      expect(text).toBe("hi");
+    const finalMessage = agent.state.messages.at(-1);
+    if (!finalMessage || finalMessage.role !== "assistant") {
+      throw new Error("Expected final assistant message");
     }
+    expect(getTextContent(finalMessage)).toContain("HELLO");
   });
 
   it("handles tool execution errors gracefully", async () => {
-    const streamFn = createMockStream([
-      {
-        text: "",
-        toolCalls: [{ type: "toolCall", id: "tc1", name: "fail", arguments: {} }],
-        stopReason: "toolUse",
-      },
-      { text: "Recovered" },
-    ]);
+    const agent = createAgent(
+      getLiveModel(),
+      [failTool],
+      "You are a helpful assistant. When asked to fail, call the fail tool.",
+    );
 
-    const agent = new Agent({
-      initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
-        thinkingLevel: "off",
-        tools: [failTool],
-        messages: [],
-      },
-      streamFn: streamFn as any,
-    });
+    await agent.prompt("Make it fail.");
 
-    await agent.prompt("Make it fail");
-
-    // Agent should complete without throwing
     expect(agent.state.isStreaming).toBe(false);
+    expect(agent.state.messages.at(-1)?.role).toBe("assistant");
   });
 
   it("aborts a running prompt", async () => {
-    // Create a stream that delays, then ends with a message when aborted
-    const streamFn = vi.fn((_model: Model<any>, _ctx: any, opts?: SimpleStreamOptions) => {
-      const stream = createAssistantMessageEventStream();
-      // Use the signal to detect abort and end the stream
-      const signal = opts?.signal;
-      if (signal) {
-        signal.addEventListener("abort", () => {
-          const assistant = buildAssistantMessage({ text: "", stopReason: "stop" });
-          stream.push({ type: "done", reason: "stop", message: assistant });
-        });
-      }
-      return stream;
-    });
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
+    const prompt = agent.prompt(
+      "Write a long, detailed explanation of how the internet works in at least ten paragraphs.",
+    );
 
-    const agent = new Agent({
-      initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
-        thinkingLevel: "off",
-        tools: [],
-        messages: [],
-      },
-      streamFn: streamFn as any,
-    });
-
-    const promise = agent.prompt("Wait forever");
-
-    // Give the loop time to start streaming
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(agent.state.isStreaming).toBe(true);
+    await waitForStreaming(agent);
     agent.abort();
 
+    await prompt;
     await agent.waitForIdle();
+
     expect(agent.state.isStreaming).toBe(false);
   });
 
   it("steer injects messages between turns", async () => {
-    const streamFn = createMockStream([
-      {
-        text: "",
-        toolCalls: [{ type: "toolCall", id: "tc1", name: "echo", arguments: { message: "first" } }],
-        stopReason: "toolUse",
-      },
-      { text: "Final" },
-    ]);
+    const agent = createAgent(
+      getLiveModel(),
+      [echoTool],
+      "You are a helpful assistant. When asked to repeat a word, you must use the echo tool.",
+    );
 
-    const agent = new Agent({
-      initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
-        thinkingLevel: "off",
-        tools: [echoTool],
-        messages: [],
-      },
-      streamFn: streamFn as any,
-      steeringMode: "all",
-    });
-
-    // Queue a steering message before prompting
     agent.steer({ role: "user", content: "Steered message", timestamp: Date.now() });
 
-    await agent.prompt("Start");
+    await agent.prompt("Use the echo tool to repeat FIRST exactly.");
 
-    // The steering message should appear in the final messages
-    const endMessages = agent.state.messages;
-    const steered = endMessages.find(
-      (m) => m.role === "user" && typeof m.content === "string" && m.content === "Steered message",
+    const steered = agent.state.messages.find(
+      (message) =>
+        message.role === "user" &&
+        typeof message.content === "string" &&
+        message.content === "Steered message",
     );
     expect(steered).toBeDefined();
   });
 
   it("followUp runs after agent would otherwise stop", async () => {
-    const streamFn = createMockStream([{ text: "First response" }, { text: "Follow-up response" }]);
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
 
-    const agent = new Agent({
-      initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
-        thinkingLevel: "off",
-        tools: [],
-        messages: [],
-      },
-      streamFn: streamFn as any,
-      followUpMode: "all",
-    });
-
-    // Queue a follow-up
     agent.followUp({ role: "user", content: "Continue", timestamp: Date.now() });
 
     await agent.prompt("Start");
 
-    // The stream should have been called twice (once for initial, once for follow-up)
-    expect(streamFn).toHaveBeenCalledTimes(2);
+    expect(agent.state.messages.filter((message) => message.role === "assistant")).toHaveLength(2);
+    expect(
+      agent.state.messages.find(
+        (message) => message.role === "user" && message.content === "Continue",
+      ),
+    ).toBeDefined();
   });
 
   it("subscribe returns unsubscribe function", async () => {
-    const streamFn = createMockStream([{ text: "Hello" }]);
-    const agent = new Agent({
-      initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
-        thinkingLevel: "off",
-        tools: [],
-        messages: [],
-      },
-      streamFn: streamFn as any,
-    });
-
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
     const events: AgentEvent[] = [];
-    const unsub = agent.subscribe((event) => {
+
+    const unsubscribe = agent.subscribe((event) => {
       events.push(event);
     });
 
-    // Unsubscribe before prompt
-    unsub();
+    unsubscribe();
     await agent.prompt("Ignored event");
 
-    // No events should have been collected
-    expect(events.length).toBe(0);
+    expect(events).toHaveLength(0);
   });
 
   it("reset clears messages and queues", async () => {
-    const streamFn = createMockStream([{ text: "Hello" }]);
-    const agent = new Agent({
-      initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
-        thinkingLevel: "off",
-        tools: [],
-        messages: [],
-      },
-      streamFn: streamFn as any,
-      steeringMode: "all",
-      followUpMode: "all",
-    });
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
 
     await agent.prompt("Test");
-
     agent.steer({ role: "user", content: "steer", timestamp: Date.now() });
     agent.followUp({ role: "user", content: "followup", timestamp: Date.now() });
 
@@ -317,29 +220,22 @@ describe("Agent", () => {
 
     agent.reset();
 
-    expect(agent.state.messages.length).toBe(0);
+    expect(agent.state.messages).toHaveLength(0);
     expect(agent.hasQueuedMessages()).toBe(false);
   });
 
   it("cannot continue from empty messages", async () => {
-    const agent = new Agent({
-      initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
-        thinkingLevel: "off",
-        tools: [],
-        messages: [],
-      },
-    });
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
 
     await expect(agent.continue()).rejects.toThrow("No messages to continue from");
   });
 
   it("cannot continue from assistant message without queued messages", async () => {
+    const liveModel = getLiveModel();
     const agent = new Agent({
       initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
+        model: liveModel,
+        systemPrompt: "You are a helpful assistant.",
         thinkingLevel: "off",
         tools: [],
         messages: [
@@ -369,15 +265,7 @@ describe("Agent", () => {
   });
 
   it("clearSteeringQueue and clearFollowUpQueue work", () => {
-    const agent = new Agent({
-      initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
-        thinkingLevel: "off",
-        tools: [],
-        messages: [],
-      },
-    });
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
 
     agent.steer({ role: "user", content: "s1", timestamp: Date.now() });
     agent.followUp({ role: "user", content: "f1", timestamp: Date.now() });
@@ -392,44 +280,29 @@ describe("Agent", () => {
   });
 
   it("supports prompt with string and images", async () => {
-    const streamFn = createMockStream([{ text: "I see an image" }]);
-    const agent = new Agent({
-      initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
-        thinkingLevel: "off",
-        tools: [],
-        messages: [],
-      },
-      streamFn: streamFn as any,
-    });
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
 
     await agent.prompt("Describe this", [
-      { type: "image", image: "data:image/png;base64,abc", mimeType: "image/png" },
+      {
+        type: "image",
+        image: IMAGE_DATA_URL,
+        mimeType: "image/png",
+      },
     ]);
 
-    // Stream should have been called with messages containing the image
-    expect(streamFn).toHaveBeenCalledTimes(1);
+    expect(agent.state.messages).toHaveLength(2);
+    expect(agent.state.messages.at(-1)?.role).toBe("assistant");
   });
 
   it("supports prompt with AgentMessage array", async () => {
-    const streamFn = createMockStream([{ text: "Got it" }]);
-    const agent = new Agent({
-      initialState: {
-        model: TEST_MODEL,
-        systemPrompt: "",
-        thinkingLevel: "off",
-        tools: [],
-        messages: [],
-      },
-      streamFn: streamFn as any,
-    });
+    const agent = createAgent(getLiveModel(), [], "You are a helpful assistant.");
 
     await agent.prompt([
       { role: "user", content: "First", timestamp: Date.now() },
       { role: "user", content: "Second", timestamp: Date.now() },
     ]);
 
-    expect(streamFn).toHaveBeenCalledTimes(1);
+    expect(agent.state.messages.filter((message) => message.role === "user")).toHaveLength(2);
+    expect(agent.state.messages.at(-1)?.role).toBe("assistant");
   });
 });

@@ -1,11 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { stream, streamSimple, collectStream, type Message } from "@bookingcare/ai";
-import { getModel, type Model } from "@bookingcare/ai";
-import { ContextManager, slidingWindowStrategy } from "../src/index.js";
-import { applyAuth } from "../test/helpers/auth.js";
-import type { AgentMessage } from "../src/types.js";
+import { auth, liveModel as getLiveModel } from "../helpers/live-model.js";
+import { type Model } from "@bookingcare/ai";
+import { ContextManager, slidingWindowStrategy } from "../../src/index.js";
 
-const auth = applyAuth();
+import type { AgentMessage } from "../../src/types.js";
 
 // Helper to create a large context that will overflow the budget
 function createLargeContext(basePrompt: string, repeatCount: number): AgentMessage[] {
@@ -81,7 +80,7 @@ function createContextWithCachedMessages(): AgentMessage[] {
 }
 
 describe.skipIf(!auth)("Context overflow handling", () => {
-  const model = auth ? getModel("gpt-5.4-nano") : null;
+  const model = auth ? getLiveModel() : null;
 
   describe("ContextManager with Azure OpenAI usage data", () => {
     it("correctly counts tokens from assistant messages with cache", () => {
