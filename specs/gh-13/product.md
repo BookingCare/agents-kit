@@ -2,28 +2,29 @@
 
 ## Summary
 
-Replace the ad-hoc `beforeToolCall` hook pattern with a centralized, rule-based `PermissionManager`. This provides persistent, declarative permission rules for agent tools with allow / deny / ask semantics, and enables UI-friendly permission flows.
+Replace the ad-hoc `beforeToolCall` hook pattern with a centralized, rule-based `PermissionManager`. This provides JSON-serializable permission rules for agent tools with allow / deny / ask semantics, and enables UI-friendly approval flows.
 
 ## Problem
 
 The current permission model is a per-call callback (`beforeToolCall`) that returns `continue | skip | replace`. There is no:
 
-- Persistent permission configuration (rules reset every session)
+- Persistent rule configuration
 - Centralized rule inspection (`listRules()`)
 - Scope-based restrictions (e.g., deny `write_file` outside `src/`)
 - Per-tool default policies
-- UI-friendly "ask user" flow where permission can be granted interactively
+- UI-friendly pending approval flow
 
 ## Goals
 
 1. Provide a `PermissionManager` with a `PermissionRule` data model
 2. Support three actions: `allow`, `deny`, `ask`
-3. Support scoped restrictions (paths, commands, patterns)
+3. Support scoped restrictions (paths, commands) with deterministic matching
 4. Provide default rules for built-in tools (`read_file` allow, `bash` ask, etc.)
 5. Integrate with `Agent` via `AgentOptions.permissionManager`
 6. The `beforeToolCall` hook runs _after_ permission check (composable)
 7. Emit a `permission_needed` event for `ask` decisions so UIs can respond
-8. Zero breaking changes to existing `beforeToolCall` behavior
+8. Allow persisted rules to be rehydrated from JSON without custom migration code
+9. Zero breaking changes to existing `beforeToolCall` behavior
 
 ## Non-goals
 
@@ -91,7 +92,7 @@ console.log(pm.listRules());
 
 ### Rule evaluation order
 
-Rules are evaluated in reverse registration order (last added wins):
+Rules are evaluated in reverse registration order (last added wins). `grant()` appends a new rule.
 
 ```typescript
 pm.grant({ tool: "bash", action: "deny" });
@@ -109,27 +110,29 @@ When a rule evaluates to `ask`, the tool call is suspended and a `permission_nee
 agent.subscribe(async (event) => {
   if (event.type === "permission_needed") {
     const decision = await showDialog(event.toolName, event.args);
-    // decision: "allow" | "deny"
-    event.resolve(decision);
+    event.resolve(decision); // "allow" | "deny"
   }
 });
 ```
 
-If no listener resolves the `ask`, the tool call is denied after a timeout.
+If no listener resolves the event, the tool call stays pending until a listener responds or the agent run is aborted.
 
 ### Scope matching
 
-Paths use prefix matching:
+Paths use normalized absolute-path prefix matching:
 
 ```typescript
 pm.grant({
   tool: "write_file",
   action: "deny",
-  scope: { paths: ["/etc/"] }, // denies /etc/passwd, /etc/hosts, etc.
+  scope: { paths: ["/etc"] },
 });
+
+// matches /etc/passwd and /etc/hosts
+// does not match /etc2/config
 ```
 
-Commands use substring matching for the `bash` tool:
+Commands use executable-name matching after whitespace tokenization:
 
 ```typescript
 pm.grant({
@@ -137,7 +140,21 @@ pm.grant({
   action: "allow",
   scope: { commands: ["ls", "cat", "echo"] },
 });
+
+// matches "ls -la", "cat file.txt", "echo hello"
+// does not match "sqls" or "concatenate"
 ```
+
+### Persistence
+
+`PermissionRule` objects are plain JSON. `PermissionManager.listRules()` returns them in evaluation order, so callers can persist the array externally (for example with `packages/db`) and rehydrate the manager later:
+
+```typescript
+const savedRules = await loadPermissionRules(); // PermissionRule[]
+const pm = new PermissionManager({ rules: savedRules });
+```
+
+By default the manager is in-memory only; persistence is caller-owned.
 
 ### Revoking rules
 
@@ -155,7 +172,7 @@ const rules = pm.listRules();
 
 ### Composing with beforeToolCall
 
-Permission check runs before `beforeToolCall`. A denied permission short-circuits and never reaches `beforeToolCall`.
+Permission check runs before `beforeToolCall`. A denied permission short-circuits and never reaches `beforeToolCall`. If `ask` is resolved with `allow`, `beforeToolCall` runs normally.
 
 ```typescript
 // 1. PermissionManager evaluates → allow/deny/ask
@@ -169,40 +186,42 @@ Permission check runs before `beforeToolCall`. A denied permission short-circuit
 ### Rule evaluation
 
 1. `PermissionManager` applies `DEFAULT_RULES` when constructed without explicit rules
-2. `grant(rule)` adds a rule to the registry
-3. `revoke(tool)` removes all rules for that tool
-4. `listRules()` returns all registered rules in evaluation order
-5. `evaluate(toolName, args)` returns a `PermissionDecision`
-6. Last-matching rule wins for a given tool
-7. Wildcard `*` rule matches any unmatched tool
+2. `PermissionManager` can be initialized from a persisted `PermissionRule[]`
+3. `grant(rule)` adds a rule to the registry
+4. `revoke(tool)` removes all rules for that tool
+5. `listRules()` returns all registered rules in evaluation order
+6. `evaluate(toolName, args)` returns a `PermissionDecision`
+7. Last-matching rule wins for a given tool
+8. Wildcard `*` rule matches any unmatched tool
 
 ### Decision actions
 
-8. `allow` decision permits the tool to execute
-9. `deny` decision returns an error `ToolResult` immediately
-10. `ask` decision emits `permission_needed` event and suspends execution
-11. `resolve("allow")` on an `ask` permits execution
-12. `resolve("deny")` on an `ask` returns an error `ToolResult`
+9. `allow` decision permits the tool to execute
+10. `deny` decision returns an error `ToolResult` immediately
+11. `ask` decision emits `permission_needed` and suspends execution until resolved
+12. `resolve("allow")` on an `ask` permits execution
+13. `resolve("deny")` on an `ask` returns an error `ToolResult`
 
 ### Scope matching
 
-13. `scope.paths` matches when tool's `path` argument starts with any listed path
-14. `scope.commands` matches when tool's `command` argument contains any listed command as a substring
-15. Rule without scope matches unconditionally for that tool
+14. `scope.paths` matches when the normalized `path` argument is the same as, or nested under, any listed path
+15. `scope.commands` matches when the first whitespace-delimited token of the `command` argument equals any listed command
+16. Rule without scope matches unconditionally for that tool
+17. Non-string `path` or `command` arguments bypass scope matching
 
 ### Integration
 
-16. Permission check runs before `beforeToolCall` hook
-17. `deny` decision skips `beforeToolCall` entirely
-18. Agent without `permissionManager` behaves identically to baseline
-19. `permission_needed` event includes `toolName`, `args`, `resolve`, and `reject`
+18. Permission check runs before `beforeToolCall` hook
+19. `deny` decision skips `beforeToolCall` entirely
+20. Agent without `permissionManager` behaves identically to baseline
+21. `permission_needed` event includes `toolName`, `args`, `toolCallId`, `resolve`, and `rule`
 
 ### Edge cases
 
-20. No rules match a tool: wildcard `*` rule returns `deny`
-21. Multiple matching rules for same tool: last registered wins
-22. Revoking a tool with no existing rules is a no-op
-23. Granting a duplicate rule replaces the previous one for that tool
+22. No rules match a tool: wildcard `*` rule returns `deny`
+23. Multiple matching rules for same tool: last registered wins
+24. Revoking a tool with no existing rules is a no-op
+25. Granting the same tool twice appends a new rule; later matching rules take precedence
 
 ## Validation
 
@@ -214,14 +233,17 @@ Add `permission-manager.test.ts`:
 - `grant()` adds a rule
 - `revoke()` removes rules for a tool
 - `listRules()` returns rules in evaluation order
-- `evaluate("bash", { command: "ls" })` returns allow with default rules
+- `PermissionManager` can be constructed from persisted rules
+- `evaluate("bash", { command: "ls -la" })` returns allow with default rules
 - `evaluate("unknown_tool", {})` returns deny (wildcard)
 - Last-matching rule wins
-- Scope path prefix matching (allow `/home` but deny `/home/secret`)
-- Scope command substring matching
+- Scope path prefix matching on normalized paths (allow `/home` but deny `/home/secret`)
+- Scope command-name matching
+- Non-string args bypass scope matching
 - `ask` decision emits `permission_needed` event
 - `resolve("allow")` permits execution
 - `resolve("deny")` returns error
+- `listRules()` output can be JSON-stringified and reloaded
 
 ### Integration tests
 
@@ -229,19 +251,14 @@ Add `permission-manager.test.ts`:
 - Agent with PermissionManager denies prohibited tools
 - Agent with PermissionManager asks for ambiguous tools
 - `beforeToolCall` runs after allow decision
+- `beforeToolCall` does NOT run after permission deny
+- `permission_needed` event fires with correct toolName/args/toolCallId
+- Listener calling `resolve("allow")` permits execution
+- Listener calling `resolve("deny")` denies execution
+- Pending ask stays suspended until resolved
 - Agent without PermissionManager runs identically to baseline
 
 ### Regression tests
 
 - `agent-loop.test.ts` passes without modification
 - `agent.test.ts` passes without modification
-
-## Open questions
-
-1. **Should `ask` timeout?** If no listener resolves an `ask`, should it auto-deny after N seconds, or block forever? The current proposal says "denied after a timeout" but this adds async-complexity. Is an explicit `reject()` (e.g., via abort signal) sufficient?
-
-2. **Should scope support glob patterns or regex?** Path prefix matching is simple but may not cover all use cases. Should we support `minimatch`-style globs?
-
-3. **Should permission rules be serializable to JSON?** This is mentioned in the issue as a goal for persistence, but the `scope.commands` array is already serializable. Is there anything else needed?
-
-4. **Should the `permission_needed` event type be added to `AgentEvent` union?** This is a new event type not emitted by the loop but by the permission system. How should it integrate with the existing event system?
