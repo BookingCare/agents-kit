@@ -653,8 +653,14 @@ async function executeToolCalls(
       timestamp: Date.now(),
     });
 
-    if (config.permissionManager) {
-      const decision = config.permissionManager.evaluate(toolCall.name, args);
+    const evaluatePermission = async (
+      currentArgs: Record<string, unknown>,
+    ): Promise<PreparedToolExecution | null> => {
+      if (!config.permissionManager) {
+        return null;
+      }
+
+      const decision = config.permissionManager.evaluate(toolCall.name, currentArgs);
       if (decision.action === "deny") {
         return {
           kind: "skip",
@@ -667,7 +673,7 @@ async function executeToolCalls(
         await emit({
           type: "permission_needed",
           toolName: toolCall.name,
-          args,
+          args: currentArgs,
           toolCallId: toolCall.id,
           rule: decision.rule,
           resolve: deferred.resolve,
@@ -688,6 +694,13 @@ async function executeToolCalls(
           };
         }
       }
+
+      return null;
+    };
+
+    const initialPermission = await evaluatePermission(args);
+    if (initialPermission) {
+      return initialPermission;
     }
 
     const toolDef = toolMap.get(toolCall.name);
@@ -713,6 +726,10 @@ async function executeToolCalls(
         }
         if (before.action === "replace") {
           args = before.args;
+          const replacedPermission = await evaluatePermission(args);
+          if (replacedPermission) {
+            return replacedPermission;
+          }
         }
       }
     }

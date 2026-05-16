@@ -16,7 +16,6 @@ import type { Store, AgentInfo } from "@bookingcare/db";
 import { NotFoundError, serializeAgentState, createTodoSnapshot } from "@bookingcare/db";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.js";
 import { BreakpointManager } from "./breakpoint-manager.js";
-import type { PermissionManager } from "./permission-manager.js";
 import type { TodoManager } from "./todo-manager.js";
 import type {
   AfterToolCallContext,
@@ -39,6 +38,8 @@ import type {
   ToolExecutionMode,
 } from "./types.js";
 import type { ContextManager } from "./context-manager.js";
+
+type PermissionManagerShape = NonNullable<AgentLoopConfig["permissionManager"]>;
 
 function defaultConvertToLlm(messages: AgentMessage[]): Message[] {
   return messages.filter(
@@ -147,7 +148,7 @@ export interface AgentOptions {
   /** Optional breakpoint manager for pause/resume control. */
   breakpointManager?: BreakpointManager;
   /** Optional permission manager for tool approval flow. */
-  permissionManager?: PermissionManager;
+  permissionManager?: PermissionManagerShape;
 }
 
 class PendingMessageQueue {
@@ -204,7 +205,7 @@ export class Agent {
   private readonly followUpQueue: PendingMessageQueue;
 
   public breakpointManager: BreakpointManager;
-  public permissionManager?: PermissionManager;
+  public permissionManager?: PermissionManagerShape;
   public onBreakpoint?: (hit: BreakpointHit) => Promise<void> | void;
 
   public convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;

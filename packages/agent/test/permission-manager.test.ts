@@ -53,6 +53,17 @@ const echoTool: AgentTool = {
   },
 };
 
+const pathTool: AgentTool = {
+  name: "inspect_path",
+  description: "Returns the path",
+  parameters: Type.Object({ path: Type.String() }),
+  label: "Inspect Path",
+  execute: async (_toolCallId, params) => {
+    const { path: filePath } = params as { path: string };
+    return { content: filePath };
+  },
+};
+
 function getTextContent(message: AgentMessage): string {
   if (typeof message.content === "string") {
     return message.content;
@@ -124,7 +135,9 @@ function createMockStream(responses: MockResponse[]): StreamFn {
         });
       }
 
-      response.toolCalls?.forEach((toolCall, contentIndex) => {
+      const contentIndexOffset = response.text ? 1 : 0;
+      response.toolCalls?.forEach((toolCall, index) => {
+        const contentIndex = contentIndexOffset + index;
         stream.push({ type: "toolcall_start", contentIndex, partial: assistant });
         stream.push({
           type: "toolcall_end",
@@ -152,15 +165,16 @@ function createMockStream(responses: MockResponse[]): StreamFn {
 
 function createAgent(options: {
   streamFn: StreamFn;
-  permissionManager?: PermissionManager;
+  permissionManager?: AgentOptions["permissionManager"];
   beforeToolCall?: AgentOptions["beforeToolCall"];
+  tools?: AgentTool[];
 }) {
   return new Agent({
     initialState: {
       model: TEST_MODEL,
       systemPrompt: "You are a helpful assistant.",
       thinkingLevel: "off",
-      tools: [echoTool],
+      tools: options.tools ?? [echoTool],
       messages: [],
     },
     streamFn: options.streamFn,
@@ -296,6 +310,81 @@ describe("Agent permission integration", () => {
       throw new Error("Expected tool result message");
     }
     expect(getTextContent(toolResult)).toBe("hello");
+  });
+
+  it("accepts custom permission manager implementations", async () => {
+    const streamFn = createMockStream([
+      {
+        toolCalls: [{ id: "tc-1", name: "echo", arguments: { message: "hello" } }],
+        stopReason: "toolUse",
+      },
+      { text: "done" },
+    ]);
+
+    const permissionManager: NonNullable<AgentOptions["permissionManager"]> = {
+      evaluate: () => ({
+        action: "allow",
+        rule: { tool: "echo", action: "allow" },
+      }),
+    };
+
+    const agent = createAgent({
+      streamFn,
+      permissionManager,
+    });
+
+    await agent.prompt("Use echo");
+
+    const toolResult = agent.state.messages.find((message) => message.role === "toolResult");
+    expect(toolResult).toBeDefined();
+    if (!toolResult || toolResult.role !== "toolResult") {
+      throw new Error("Expected tool result message");
+    }
+    expect(getTextContent(toolResult)).toBe("hello");
+  });
+
+  it("re-evaluates permission after beforeToolCall replaces args", async () => {
+    const safeDir = path.resolve(os.tmpdir(), `permission-manager-safe-${Date.now()}`);
+    const safePath = path.join(safeDir, "inside.txt");
+    const unsafePath = path.resolve(os.tmpdir(), `permission-manager-unsafe-${Date.now()}.txt`);
+
+    const streamFn = createMockStream([
+      {
+        toolCalls: [{ id: "tc-1", name: "inspect_path", arguments: { path: safePath } }],
+        stopReason: "toolUse",
+      },
+      { text: "done" },
+    ]);
+
+    const beforeToolCall = vi.fn(async () => ({
+      action: "replace" as const,
+      args: { path: unsafePath },
+    }));
+    const manager = new PermissionManager({
+      rules: [
+        { tool: "inspect_path", action: "deny" },
+        { tool: "inspect_path", action: "allow", scope: { paths: [safeDir] } },
+      ],
+    });
+
+    const agent = createAgent({
+      streamFn,
+      tools: [pathTool],
+      permissionManager: manager,
+      beforeToolCall,
+    });
+
+    await agent.prompt("Use inspect_path");
+
+    expect(beforeToolCall).toHaveBeenCalledTimes(1);
+
+    const toolResult = agent.state.messages.find((message) => message.role === "toolResult");
+    expect(toolResult).toBeDefined();
+    if (!toolResult || toolResult.role !== "toolResult") {
+      throw new Error("Expected tool result message");
+    }
+    expect(toolResult.isError).toBe(true);
+    expect(getTextContent(toolResult)).toBe("Permission denied.");
   });
 
   it("returns a denied tool result when permission is rejected", async () => {
