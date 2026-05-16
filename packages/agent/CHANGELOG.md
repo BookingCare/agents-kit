@@ -11,6 +11,7 @@
 - State is persisted automatically on each `agent_end` event when a `store` is configured
 - Optional `sandbox` parameter on `createToolDispatch()` — bash, read_file, write_file, and edit_file route through `@bookingcare/infa` when provided
 - Tool dispatch handlers are async-aware so sandbox-backed commands can be awaited in the agent loop
+- Sandboxed `read_file` preserves the existing 50 KB default cap when no explicit line limit is provided
 
 ## [0.2.0] - 2026-05-13
 

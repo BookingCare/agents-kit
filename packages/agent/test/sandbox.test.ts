@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createSandbox } from "../../infa/src/index.js";
@@ -120,6 +120,18 @@ describe("sandbox dispatch integration", () => {
     });
 
     expect(readFileSync(join(workdir, "nested/file.txt"), "utf-8")).toBe("hi");
+  });
+
+  it("preserves the 50KB default cap for sandboxed read_file", async () => {
+    const workdir = createTempDir("agent-sandbox-read-cap-");
+    const sandbox = createSandbox({ kind: "local", workdir });
+    const dispatchBundle = createToolDispatch(workdir, undefined, sandbox);
+
+    writeFileSync(join(workdir, "big.txt"), "a".repeat(60_000));
+
+    const content = await dispatchBundle.dispatch.read_file({ path: "big.txt" });
+    expect(content.length).toBe(50_000);
+    expect(content).toBe("a".repeat(50_000));
   });
 
   it("enforces timeout through the dispatch flow", async () => {

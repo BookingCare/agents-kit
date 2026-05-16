@@ -130,7 +130,12 @@ async function runBashWithSandbox(command: string, sandbox: Sandbox): Promise<st
 }
 
 async function runReadWithSandbox(path: string, sandbox: Sandbox, limit?: number): Promise<string> {
-  return await sandbox.readFile(path, limit);
+  if (limit != null) {
+    return await sandbox.readFile(path, limit);
+  }
+
+  const content = await sandbox.readFile(path);
+  return content.slice(0, 50_000);
 }
 
 async function runWriteWithSandbox(
@@ -148,18 +153,7 @@ async function runEditWithSandbox(
   newText: string,
   sandbox: Sandbox,
 ): Promise<string> {
-  const content = await sandbox.readFile(path);
-  const index = content.indexOf(oldText);
-  if (index === -1) {
-    throw new Error(`old_text not found in ${path}`);
-  }
-  const secondIndex = content.indexOf(oldText, index + 1);
-  if (secondIndex !== -1) {
-    throw new Error(`old_text is not unique in ${path} (found at multiple positions)`);
-  }
-  const updated = content.slice(0, index) + newText + content.slice(index + oldText.length);
-  await sandbox.writeFile(path, updated);
-  return `Edited ${path}: replaced ${oldText.length} chars with ${newText.length} chars`;
+  return await sandbox.editFile(path, oldText, newText);
 }
 
 // --- Todo tool ---

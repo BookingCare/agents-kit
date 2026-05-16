@@ -26,4 +26,5 @@ export interface Sandbox {
   exec(command: string, options?: SandboxExecOptions): Promise<SandboxResult>;
   readFile(path: string, limit?: number): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
+  editFile(path: string, oldText: string, newText: string): Promise<string>;
 }

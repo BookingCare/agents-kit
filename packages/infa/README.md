@@ -25,3 +25,5 @@ const sandbox = createSandbox({
 
 const result = await sandbox.exec("echo hello");
 ```
+
+`Sandbox` also exposes `readFile()`, `writeFile()`, and `editFile()` for workspace-scoped file operations.

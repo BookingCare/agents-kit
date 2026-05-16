@@ -23,6 +23,7 @@ describe("createSandbox", () => {
     expect(sandbox).toHaveProperty("exec");
     expect(sandbox).toHaveProperty("readFile");
     expect(sandbox).toHaveProperty("writeFile");
+    expect(sandbox).toHaveProperty("editFile");
   });
 
   it("fails fast for unsupported kinds", () => {

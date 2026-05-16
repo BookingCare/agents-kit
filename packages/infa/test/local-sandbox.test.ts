@@ -12,6 +12,10 @@ function createTempDir(prefix: string): string {
   return dir;
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 afterEach(() => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
@@ -47,6 +51,26 @@ describe("LocalSandbox", () => {
     expect(result.killedBy).toBe("timeout");
   });
 
+  it("kills descendant processes on timeout", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const workdir = createTempDir("infa-tree-timeout-");
+    const sandbox = createSandbox({ kind: "local", workdir });
+    const marker = join(workdir, "timeout-child.txt");
+
+    const result = await sandbox.exec(
+      `"${process.execPath}" -e "setTimeout(() => require('node:fs').writeFileSync('timeout-child.txt', 'alive'), 300); setInterval(() => {}, 1000)"`,
+      { timeout: 50 },
+    );
+
+    expect(result.killed).toBe(true);
+    expect(result.killedBy).toBe("timeout");
+    await wait(400);
+    expect(existsSync(marker)).toBe(false);
+  });
+
   it("exec kills a command that exceeds maxOutput", async () => {
     const workdir = createTempDir("infa-output-");
     const sandbox = createSandbox({ kind: "local", workdir });
@@ -59,6 +83,26 @@ describe("LocalSandbox", () => {
     expect(result.killed).toBe(true);
     expect(result.killedBy).toBe("output");
     expect(result.stdout.length).toBeLessThanOrEqual(100);
+  });
+
+  it("kills descendant processes on maxOutput", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const workdir = createTempDir("infa-tree-output-");
+    const sandbox = createSandbox({ kind: "local", workdir });
+    const marker = join(workdir, "output-child.txt");
+
+    const result = await sandbox.exec(
+      `"${process.execPath}" -e "setTimeout(() => require('node:fs').writeFileSync('output-child.txt', 'alive'), 300); process.stdout.write('x'.repeat(5000)); setInterval(() => {}, 1000)"`,
+      { maxOutput: 100 },
+    );
+
+    expect(result.killed).toBe(true);
+    expect(result.killedBy).toBe("output");
+    await wait(400);
+    expect(existsSync(marker)).toBe(false);
   });
 
   it("readFile returns file contents and respects line limits", async () => {
