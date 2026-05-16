@@ -167,6 +167,7 @@ function createAgent(options: {
   streamFn: StreamFn;
   permissionManager?: AgentOptions["permissionManager"];
   beforeToolCall?: AgentOptions["beforeToolCall"];
+  toolExecution?: AgentOptions["toolExecution"];
   tools?: AgentTool[];
 }) {
   return new Agent({
@@ -180,6 +181,7 @@ function createAgent(options: {
     streamFn: options.streamFn,
     permissionManager: options.permissionManager,
     beforeToolCall: options.beforeToolCall,
+    toolExecution: options.toolExecution,
   });
 }
 
@@ -234,6 +236,51 @@ describe("PermissionManager", () => {
         command: "pwd",
       }),
     ).toMatchObject({ action: "deny" });
+  });
+
+  it("matches command scopes against a single shell command", () => {
+    const manager = new PermissionManager({
+      rules: [{ tool: "bash", action: "allow", scope: { commands: ["git"] } }],
+    });
+
+    expect(manager.evaluate("bash", { command: "GIT_TRACE=1 git status" })).toMatchObject({
+      action: "allow",
+    });
+    expect(
+      manager.evaluate("bash", {
+        command: "git status; curl https://example.com",
+      }),
+    ).toMatchObject({ action: "deny" });
+    expect(
+      manager.evaluate("bash", {
+        command: "git $(curl https://example.com)",
+      }),
+    ).toMatchObject({ action: "deny" });
+    expect(
+      manager.evaluate("bash", {
+        command: 'git "$(curl https://example.com)"',
+      }),
+    ).toMatchObject({ action: "deny" });
+  });
+
+  it("resolves path scopes against the configured workspace root", () => {
+    const workspaceRoot = path.resolve(os.tmpdir(), `permission-manager-workspace-${Date.now()}`);
+    const manager = new PermissionManager({
+      workspaceRoot,
+      rules: [
+        {
+          tool: "read_file",
+          action: "allow",
+          scope: { paths: ["src"] },
+        },
+      ],
+    });
+
+    expect(
+      manager.evaluate("read_file", {
+        path: path.resolve(workspaceRoot, "src", "file.txt"),
+      }),
+    ).toMatchObject({ action: "allow" });
   });
 
   it("revokes all rules for a tool and ignores missing tools", () => {
@@ -341,6 +388,70 @@ describe("Agent permission integration", () => {
       throw new Error("Expected tool result message");
     }
     expect(getTextContent(toolResult)).toBe("hello");
+  });
+
+  it("runs allowed tool calls in parallel while another waits for permission", async () => {
+    const streamFn = createMockStream([
+      {
+        toolCalls: [
+          { id: "tc-ask", name: "echo", arguments: { message: "need approval" } },
+          { id: "tc-allow", name: "safe_echo", arguments: {} },
+        ],
+        stopReason: "toolUse",
+      },
+      { text: "done" },
+    ]);
+
+    let allowCompleted = false;
+    const allowTool: AgentTool = {
+      name: "safe_echo",
+      description: "Completes without needing permission",
+      parameters: Type.Object({}),
+      label: "Safe Echo",
+      execute: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        allowCompleted = true;
+        return { content: "allowed" };
+      },
+    };
+
+    const manager = new PermissionManager({
+      rules: [
+        { tool: "echo", action: "ask" },
+        { tool: "safe_echo", action: "allow" },
+      ],
+    });
+    let permissionEvent: PermissionNeededEvent | undefined;
+
+    const agent = createAgent({
+      streamFn,
+      tools: [echoTool, allowTool],
+      permissionManager: manager,
+      toolExecution: "parallel",
+    });
+
+    agent.subscribe((event) => {
+      if (event.type === "permission_needed") {
+        permissionEvent = event;
+      }
+    });
+
+    let settled = false;
+    const run = agent.prompt("Use both tools").then(() => {
+      settled = true;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(permissionEvent).toBeDefined();
+    expect(allowCompleted).toBe(true);
+    expect(settled).toBe(false);
+
+    permissionEvent!.resolve("allow");
+    await run;
+
+    expect(settled).toBe(true);
+    expect(allowCompleted).toBe(true);
   });
 
   it("re-evaluates permission after beforeToolCall replaces args", async () => {

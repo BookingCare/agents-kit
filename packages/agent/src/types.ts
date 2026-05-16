@@ -123,6 +123,7 @@ export interface PermissionNeededEvent {
 
 export interface PermissionManagerOptions {
   rules?: PermissionRule[];
+  workspaceRoot?: string;
 }
 
 export interface AgentLoopTurnUpdate {

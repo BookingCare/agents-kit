@@ -818,18 +818,15 @@ async function executeToolCalls(
       results.push(await prepared.run());
     }
   } else {
-    const prepared = [] as PreparedToolExecution[];
-    for (const tc of toolCalls) {
-      if (signal.aborted) break;
-      prepared.push(await prepare(tc));
-    }
-
     if (signal.aborted) {
       return results;
     }
 
     const settled = await Promise.all(
-      prepared.map((item) => (item.kind === "skip" ? item.result : item.run())),
+      toolCalls.map(async (tc) => {
+        const prepared = await prepare(tc);
+        return prepared.kind === "skip" ? prepared.result : prepared.run();
+      }),
     );
     results.push(...settled);
   }
