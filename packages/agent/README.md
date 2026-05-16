@@ -61,6 +61,17 @@ Four file tools are available when `workdir` is set (or passed to `createToolDis
 
 File paths are sandboxed to `workdir` — path traversal attempts throw.
 
+### Sandbox integration
+
+Pass a sandbox from `@bookingcare/infa` to route bash and file tools through process-isolated execution:
+
+```typescript
+import { createSandbox } from "@bookingcare/infa";
+
+const sandbox = createSandbox({ kind: "local", workdir: "/workspace" });
+const { tools, dispatch } = createToolDispatch("/workspace", undefined, sandbox);
+```
+
 ### Custom dispatch
 
 ```typescript

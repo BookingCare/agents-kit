@@ -72,7 +72,9 @@ export async function agentLoop(query: string, options: AgentLoopOptions) {
       parameters: t.parameters as AgentTool["parameters"],
       label: t.name,
       execute: handler
-        ? async (_toolCallId, params) => ({ content: handler(params as Record<string, unknown>) })
+        ? async (_toolCallId, params) => ({
+            content: await handler(params as Record<string, unknown>),
+          })
         : async () => ({ content: `Unknown tool: ${t.name}`, isError: true }),
     };
   });
@@ -85,7 +87,7 @@ export async function agentLoop(query: string, options: AgentLoopOptions) {
         label: name,
         parameters: Type.Object({}),
         execute: async (_toolCallId, params) => ({
-          content: dispatch[name](params as Record<string, unknown>),
+          content: await dispatch[name](params as Record<string, unknown>),
         }),
       });
     }

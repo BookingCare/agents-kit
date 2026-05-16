@@ -1,7 +1,7 @@
 {
-  "name": "@bookingcare/agent",
+  "name": "@bookingcare/infa",
   "version": "0.2.0",
-  "description": "General-purpose agent with transport abstraction, state management, and attachment support",
+  "description": "Sandbox execution for process-isolated agent tools with resource limits",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -26,11 +26,5 @@
     "@types/node": "^25.6.2",
     "typescript": "^5.8.0",
     "vitest": "^4.1.5"
-  },
-  "dependencies": {
-    "@bookingcare/ai": "workspace:*",
-    "@bookingcare/db": "workspace:*",
-    "@bookingcare/infa": "workspace:*",
-    "@sinclair/typebox": "^0.34.49"
   }
 }

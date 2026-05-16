@@ -32,7 +32,7 @@ export interface AgentLoopOptions {
 
 // --- Tools ---
 
-export type ToolHandler = (args: Record<string, unknown>) => string;
+export type ToolHandler = (args: Record<string, unknown>) => string | Promise<string>;
 
 export interface ToolDispatch {
   tools: Tool[];

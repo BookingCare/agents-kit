@@ -6,6 +6,7 @@ import { resolve, dirname, relative, isAbsolute } from "node:path";
 import { SkillLoader } from "./skill-loader.js";
 import { TodoManager } from "./todo-manager.js";
 import type { TodoItem } from "./todo-manager.js";
+import type { Sandbox } from "@bookingcare/infa";
 import type { ToolHandler, ToolDispatch } from "./types.js";
 
 export type { ToolHandler, ToolDispatch } from "./types.js";
@@ -120,6 +121,47 @@ function runEdit(path: string, oldText: string, newText: string, workdir: string
   return `Edited ${path}: replaced ${oldText.length} chars with ${newText.length} chars`;
 }
 
+async function runBashWithSandbox(command: string, sandbox: Sandbox): Promise<string> {
+  const result = await sandbox.exec(command);
+  if (result.exitCode !== 0 || result.killed) {
+    throw new Error(result.stderr || `Command failed with exit code ${result.exitCode}`);
+  }
+  return result.stdout || "(no output)";
+}
+
+async function runReadWithSandbox(path: string, sandbox: Sandbox, limit?: number): Promise<string> {
+  return await sandbox.readFile(path, limit);
+}
+
+async function runWriteWithSandbox(
+  path: string,
+  content: string,
+  sandbox: Sandbox,
+): Promise<string> {
+  await sandbox.writeFile(path, content);
+  return `Wrote ${content.length} bytes to ${path}`;
+}
+
+async function runEditWithSandbox(
+  path: string,
+  oldText: string,
+  newText: string,
+  sandbox: Sandbox,
+): Promise<string> {
+  const content = await sandbox.readFile(path);
+  const index = content.indexOf(oldText);
+  if (index === -1) {
+    throw new Error(`old_text not found in ${path}`);
+  }
+  const secondIndex = content.indexOf(oldText, index + 1);
+  if (secondIndex !== -1) {
+    throw new Error(`old_text is not unique in ${path} (found at multiple positions)`);
+  }
+  const updated = content.slice(0, index) + newText + content.slice(index + oldText.length);
+  await sandbox.writeFile(path, updated);
+  return `Edited ${path}: replaced ${oldText.length} chars with ${newText.length} chars`;
+}
+
 // --- Todo tool ---
 
 export const todoTool = tool({
@@ -149,27 +191,49 @@ const baseTools = [bashTool, readFileTool, writeFileTool, editFileTool, todoTool
 /**
  * Create a tool dispatch table bound to a workspace directory.
  * If a skillsDir is provided, the load_skill tool is added automatically.
+ * If a sandbox is provided, bash and file tools route through it.
  * Adding a tool = add a handler + add a schema entry. The loop never changes.
  */
 export function createToolDispatch(
   workdir: string = process.cwd(),
   skillsDir?: string,
+  sandbox?: Sandbox,
 ): ToolDispatch {
   const skillLoader = skillsDir ? new SkillLoader(skillsDir) : undefined;
 
   const todoManager = new TodoManager();
 
-  const dispatch: Record<string, ToolHandler> = {
-    bash: (args) => runBash(args.command as string, workdir),
-    read_file: (args) => runRead(args.path as string, workdir, args.limit as number | undefined),
-    write_file: (args) => runWrite(args.path as string, args.content as string, workdir),
-    edit_file: (args) =>
-      runEdit(args.path as string, args.old_text as string, args.new_text as string, workdir),
-    todo: (args) => todoManager.update(args.items as TodoItem[]),
-    ...(skillLoader && {
-      load_skill: (args) => skillLoader.getContent(args.name as string),
-    }),
-  };
+  const dispatch: Record<string, ToolHandler> = sandbox
+    ? {
+        bash: (args) => runBashWithSandbox(args.command as string, sandbox),
+        read_file: (args) =>
+          runReadWithSandbox(args.path as string, sandbox, args.limit as number | undefined),
+        write_file: (args) =>
+          runWriteWithSandbox(args.path as string, args.content as string, sandbox),
+        edit_file: (args) =>
+          runEditWithSandbox(
+            args.path as string,
+            args.old_text as string,
+            args.new_text as string,
+            sandbox,
+          ),
+        todo: (args) => todoManager.update(args.items as TodoItem[]),
+        ...(skillLoader && {
+          load_skill: (args) => skillLoader.getContent(args.name as string),
+        }),
+      }
+    : {
+        bash: (args) => runBash(args.command as string, workdir),
+        read_file: (args) =>
+          runRead(args.path as string, workdir, args.limit as number | undefined),
+        write_file: (args) => runWrite(args.path as string, args.content as string, workdir),
+        edit_file: (args) =>
+          runEdit(args.path as string, args.old_text as string, args.new_text as string, workdir),
+        todo: (args) => todoManager.update(args.items as TodoItem[]),
+        ...(skillLoader && {
+          load_skill: (args) => skillLoader.getContent(args.name as string),
+        }),
+      };
 
   const tools = skillLoader ? [...baseTools, loadSkillTool] : [...baseTools];
 
