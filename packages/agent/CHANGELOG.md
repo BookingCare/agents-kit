@@ -8,6 +8,7 @@
 
 ### Added
 
+- `PermissionManager` — rule-based tool approval with allow / deny / ask decisions, scoped path/command matching, and `permission_needed` events on `Agent`
 - Optional `store` parameter on `Agent` — accepts a `@bookingcare/db` `Store` for automatic session persistence
 - Optional `todoManager` parameter on `Agent` — todo state is persisted to the store alongside messages
 - `Agent.resume()` static method — reconstructs an agent from a previously persisted session (loads messages, metadata, and todo state)

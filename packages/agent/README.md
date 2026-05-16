@@ -200,10 +200,45 @@ console.log(agent.state.messages);
 | `message_start`        | Stream started (partial message)           |
 | `message_update`       | Text delta received (partial message)      |
 | `message_end`          | Full message received                      |
+| `permission_needed`    | Tool call is waiting for allow/deny        |
 | `tool_execution_start` | Tool execution began                       |
 | `tool_execution_end`   | Tool execution finished                    |
 | `turn_end`             | Assistant message + tool results processed |
 | `agent_end`            | Agent finished (full transcript)           |
+
+### PermissionManager
+
+`Agent` can gate tool calls with a rule-based `PermissionManager`.
+
+```typescript
+import { Agent, PermissionManager } from "@bookingcare/agent";
+import { getModel } from "@bookingcare/ai";
+
+const permissions = new PermissionManager();
+permissions.grant({ tool: "read_file", action: "allow" });
+permissions.grant({ tool: "bash", action: "ask" });
+
+const agent = new Agent({
+  initialState: {
+    model: getModel("gpt-5.4-nano")!,
+    systemPrompt: "You are a coding assistant.",
+    tools: [],
+    messages: [],
+    thinkingLevel: "off",
+  },
+  permissionManager: permissions,
+});
+
+agent.subscribe((event) => {
+  if (event.type === "permission_needed") {
+    event.resolve("allow");
+  }
+});
+```
+
+- `allow` and `deny` are checked before `beforeToolCall`
+- `ask` emits `permission_needed` and waits for `resolve("allow" | "deny")`
+- Default rules: `read_file` allow, `bash`/`write_file`/`edit_file` ask, wildcard deny
 
 ### Steering and Follow-up Queues
 

@@ -28,6 +28,42 @@ export type { AgentLoopOptions } from "./types.js";
 
 const MAX_TOOL_CALLS = 128;
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+function waitForPromiseOrAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+): Promise<T | undefined> {
+  if (signal.aborted) {
+    return Promise.resolve(undefined);
+  }
+
+  return new Promise<T | undefined>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(undefined);
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 // ── Public: simple API ────────────────────────────────────────────────
 
 /**
@@ -600,6 +636,73 @@ async function executeToolCalls(
 
   const prepare = async (toolCall: ToolCall): Promise<PreparedToolExecution> => {
     let args = toolCall.arguments as Record<string, unknown>;
+    const permissionDeniedResult = (): AgentMessage => ({
+      role: "toolResult",
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      content: [{ type: "text" as const, text: "Permission denied." }],
+      isError: true,
+      timestamp: Date.now(),
+    });
+    const abortedResult = (): AgentMessage => ({
+      role: "toolResult",
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      content: [{ type: "text" as const, text: "" }],
+      isError: false,
+      timestamp: Date.now(),
+    });
+
+    const evaluatePermission = async (
+      currentArgs: Record<string, unknown>,
+    ): Promise<PreparedToolExecution | null> => {
+      if (!config.permissionManager) {
+        return null;
+      }
+
+      const decision = config.permissionManager.evaluate(toolCall.name, currentArgs);
+      if (decision.action === "deny") {
+        return {
+          kind: "skip",
+          result: permissionDeniedResult(),
+        };
+      }
+
+      if (decision.action === "ask") {
+        const deferred = createDeferred<"allow" | "deny">();
+        await emit({
+          type: "permission_needed",
+          toolName: toolCall.name,
+          args: currentArgs,
+          toolCallId: toolCall.id,
+          rule: decision.rule,
+          resolve: deferred.resolve,
+        });
+
+        const answer = await waitForPromiseOrAbort(deferred.promise, signal);
+        if (answer === undefined || signal.aborted) {
+          return {
+            kind: "skip",
+            result: abortedResult(),
+          };
+        }
+
+        if (answer === "deny") {
+          return {
+            kind: "skip",
+            result: permissionDeniedResult(),
+          };
+        }
+      }
+
+      return null;
+    };
+
+    const initialPermission = await evaluatePermission(args);
+    if (initialPermission) {
+      return initialPermission;
+    }
+
     const toolDef = toolMap.get(toolCall.name);
 
     if (config.beforeToolCall) {
@@ -623,6 +726,10 @@ async function executeToolCalls(
         }
         if (before.action === "replace") {
           args = before.args;
+          const replacedPermission = await evaluatePermission(args);
+          if (replacedPermission) {
+            return replacedPermission;
+          }
         }
       }
     }
@@ -711,18 +818,15 @@ async function executeToolCalls(
       results.push(await prepared.run());
     }
   } else {
-    const prepared = [] as PreparedToolExecution[];
-    for (const tc of toolCalls) {
-      if (signal.aborted) break;
-      prepared.push(await prepare(tc));
-    }
-
     if (signal.aborted) {
       return results;
     }
 
     const settled = await Promise.all(
-      prepared.map((item) => (item.kind === "skip" ? item.result : item.run())),
+      toolCalls.map(async (tc) => {
+        const prepared = await prepare(tc);
+        return prepared.kind === "skip" ? prepared.result : prepared.run();
+      }),
     );
     results.push(...settled);
   }

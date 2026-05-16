@@ -39,6 +39,8 @@ import type {
 } from "./types.js";
 import type { ContextManager } from "./context-manager.js";
 
+type PermissionManagerShape = NonNullable<AgentLoopConfig["permissionManager"]>;
+
 function defaultConvertToLlm(messages: AgentMessage[]): Message[] {
   return messages.filter(
     (message) =>
@@ -145,6 +147,8 @@ export interface AgentOptions {
   contextManager?: ContextManager;
   /** Optional breakpoint manager for pause/resume control. */
   breakpointManager?: BreakpointManager;
+  /** Optional permission manager for tool approval flow. */
+  permissionManager?: PermissionManagerShape;
 }
 
 class PendingMessageQueue {
@@ -201,6 +205,7 @@ export class Agent {
   private readonly followUpQueue: PendingMessageQueue;
 
   public breakpointManager: BreakpointManager;
+  public permissionManager?: PermissionManagerShape;
   public onBreakpoint?: (hit: BreakpointHit) => Promise<void> | void;
 
   public convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
@@ -252,6 +257,7 @@ export class Agent {
     this.steeringQueue = new PendingMessageQueue(options.steeringMode ?? "one-at-a-time");
     this.followUpQueue = new PendingMessageQueue(options.followUpMode ?? "one-at-a-time");
     this.breakpointManager = options.breakpointManager ?? new BreakpointManager();
+    this.permissionManager = options.permissionManager;
     this.store = options.store;
     this.todoManager = options.todoManager;
     this.sessionId = options.sessionId ?? (options.store ? randomUUID() : undefined);
@@ -672,6 +678,7 @@ export class Agent {
         await this.waitForBreakpoint(stage, context);
       },
       beforeToolCall: this.beforeToolCall,
+      permissionManager: this.permissionManager,
       afterToolCall: this.afterToolCall,
       prepareNextTurn: this.prepareNextTurn
         ? async () => await this.prepareNextTurn?.(this.signal)
@@ -814,6 +821,10 @@ export class Agent {
             `[agent] persistence failed: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
+        break;
+
+      case "permission_needed":
+        // No internal state change needed; event is forwarded to listeners
         break;
 
       case "context_trimmed":
