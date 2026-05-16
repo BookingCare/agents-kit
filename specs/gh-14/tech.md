@@ -40,7 +40,9 @@ A buggy or malicious tool can block the event loop, escape the workspace through
 
 ### 1. New package: `packages/infa`
 
-Move sandboxing into a separate workspace package, `packages/infa` (the renamed replacement for the old `packages/db` slot). Publish it as `@bookingcare/infa`.
+Move sandboxing into a separate workspace package, `packages/infa`. Publish it as `@bookingcare/infa`.
+
+This package is additive; it does not replace or rename `packages/db`.
 
 The package is the construction boundary for sandbox implementations. It currently supports one kind: `local`.
 
@@ -100,6 +102,10 @@ export function createSandbox(options: SandboxOptions): Sandbox;
 
 `createSandbox()` picks an implementation from a registry keyed by `kind`. For now, the registry only contains `local`.
 
+`SandboxExecOptions` are applied per call and override the sandbox defaults for the same fields (`timeout`, `maxOutput`). `workdir`, `env`, and `maxMemory` stay fixed on the sandbox instance.
+
+`limit` means a maximum number of lines to return, matching the existing `read_file` tool.
+
 ### 3. Local sandbox implementation
 
 `LocalSandbox` is the only implementation in the initial release.
@@ -107,7 +113,7 @@ export function createSandbox(options: SandboxOptions): Sandbox;
 Behavior:
 
 - create `workdir` on construction
-- run commands with `spawn()`, not `execSync()`
+- run commands with `spawn(..., { shell: true })`, not `execSync()`, so pipes, redirects, and `&&` keep working
 - do not inherit the parent environment wholesale
 - enforce `timeout` and `maxOutput` by terminating the child process
 - keep `cwd` fixed to the configured `workdir`
@@ -124,11 +130,11 @@ Rules:
 1. reject absolute paths
 2. resolve the requested path relative to `workdir`
 3. resolve the nearest existing ancestor with `realpath`
-4. confirm the resolved ancestor stays under `workdir`
+4. compare the canonical ancestor against the canonical `workdir` path, using case-insensitive comparison on filesystems that need it
 5. allow new nested files and directories inside `workdir`
 6. reject paths that escape via `..` or symlinks
 
-`writeFile()` must validate first, then create missing parents under `workdir`, then write the file. It must not reject a path just because the parent directories do not exist yet.
+`writeFile()` validates first, then creates any missing parents under `workdir` before writing. It must not reject a path just because the parent directories do not exist yet.
 
 ### 5. Agent integration
 

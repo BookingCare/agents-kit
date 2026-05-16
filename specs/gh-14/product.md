@@ -86,7 +86,7 @@ Paths are resolved relative to the sandbox's `workdir`.
 
 | Limit       | Behavior on exceed                                                           |
 | ----------- | ---------------------------------------------------------------------------- |
-| `timeout`   | Process is killed with `SIGTERM` (then `SIGKILL` after a grace period)       |
+| `timeout`   | Process is terminated, then force-killed after a grace period                |
 | `maxMemory` | Best-effort enforcement where the local runtime can apply it                 |
 | `maxOutput` | Process is killed when combined stdout + stderr exceeds the configured limit |
 
@@ -95,15 +95,15 @@ Paths are resolved relative to the sandbox's `workdir`.
 The `Sandbox` enforces that all file paths remain within the configured `workdir`:
 
 1. Resolve relative paths against `workdir`
-2. Resolve all symlinks in the path
-3. Verify the resolved path is still under `workdir`
+2. Resolve the nearest existing ancestor with `realpath`
+3. Compare the canonical path against `workdir`, using case-insensitive comparison rules on filesystems that need it
 4. Reject paths that escape the workspace
 
 ```typescript
 sandbox.readFile("../../../etc/passwd"); // → Error: Path escapes workspace
 ```
 
-`writeFile()` must create missing parent directories inside the sandbox after validation.
+`writeFile()` validates the target path first, then creates missing parent directories inside the sandbox before writing.
 
 ### Environment variable whitelist
 
@@ -148,7 +148,7 @@ const sandbox = createSandbox({
 - `readFile()` reads text files correctly
 - `writeFile()` writes and creates parent directories
 - path validation rejects relative path escaping `workdir`
-- path validation resolves symlinks before checking bounds
+- path validation resolves the nearest existing ancestor before checking bounds
 - path validation rejects absolute paths
 - `env` is passed to spawned processes correctly
 - default env is empty and safe
