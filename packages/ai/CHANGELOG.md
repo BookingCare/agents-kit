@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-17
+
 ### Breaking Changes
 
 - `ToolCall.arguments` type changed from `string` to `Record<string, any>`. Providers now receive and emit parsed argument objects instead of JSON-encoded strings.

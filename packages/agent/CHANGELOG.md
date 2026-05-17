@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-17
+
 ### Changed
 
 - `ContextManager` now uses actual `usage.input` from assistant messages instead of estimating all tokens (more accurate for assistant messages)

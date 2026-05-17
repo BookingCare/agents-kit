@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-17
+
 ### Added
 
 - `Store` interface — pluggable abstraction for persisting agent sessions (messages, todos, metadata)

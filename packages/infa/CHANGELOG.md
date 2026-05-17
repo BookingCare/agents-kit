@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-17
+
 ### Breaking Changes
 
 - `SandboxResult.killedBy` no longer advertises `memory`; the local sandbox only reports `timeout` and `output`.

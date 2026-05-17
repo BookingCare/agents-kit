@@ -1,6 +1,6 @@
 {
   "name": "@bookingcare/agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "General-purpose agent with transport abstraction, state management, and attachment support",
   "license": "MIT",
   "type": "module",
@@ -28,9 +28,9 @@
     "vitest": "^4.1.5"
   },
   "dependencies": {
-    "@bookingcare/ai": "workspace:*",
-    "@bookingcare/db": "workspace:*",
-    "@bookingcare/infa": "workspace:*",
+    "@bookingcare/ai": "^0.3.0",
+    "@bookingcare/db": "^0.3.0",
+    "@bookingcare/infa": "^0.3.0",
     "@sinclair/typebox": "^0.34.49"
   }
 }
