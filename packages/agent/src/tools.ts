@@ -6,6 +6,7 @@ import { resolve, dirname, relative, isAbsolute } from "node:path";
 import { SkillLoader } from "./skill-loader.js";
 import { TodoManager } from "./todo-manager.js";
 import type { TodoItem } from "./todo-manager.js";
+import type { Sandbox, SandboxResult } from "@bookingcare/infa";
 import type { ToolHandler, ToolDispatch } from "./types.js";
 
 export type { ToolHandler, ToolDispatch } from "./types.js";
@@ -120,6 +121,47 @@ function runEdit(path: string, oldText: string, newText: string, workdir: string
   return `Edited ${path}: replaced ${oldText.length} chars with ${newText.length} chars`;
 }
 
+function formatSandboxCommandError(result: SandboxResult): string {
+  const reason = result.killedBy ? ` (${result.killedBy})` : "";
+  const stderr = result.stderr ? `: ${result.stderr}` : "";
+  return `Command failed${reason} with exit code ${result.exitCode}${stderr}`;
+}
+
+async function runBashWithSandbox(command: string, sandbox: Sandbox): Promise<string> {
+  const result = await sandbox.exec(command);
+  if (result.exitCode !== 0 || result.killed) {
+    throw new Error(formatSandboxCommandError(result));
+  }
+  return result.stdout || "(no output)";
+}
+
+async function runReadWithSandbox(path: string, sandbox: Sandbox, limit?: number): Promise<string> {
+  if (limit != null) {
+    return await sandbox.readFile(path, limit);
+  }
+
+  const content = await sandbox.readFile(path);
+  return content.slice(0, 50_000);
+}
+
+async function runWriteWithSandbox(
+  path: string,
+  content: string,
+  sandbox: Sandbox,
+): Promise<string> {
+  await sandbox.writeFile(path, content);
+  return `Wrote ${content.length} bytes to ${path}`;
+}
+
+async function runEditWithSandbox(
+  path: string,
+  oldText: string,
+  newText: string,
+  sandbox: Sandbox,
+): Promise<string> {
+  return await sandbox.editFile(path, oldText, newText);
+}
+
 // --- Todo tool ---
 
 export const todoTool = tool({
@@ -149,27 +191,49 @@ const baseTools = [bashTool, readFileTool, writeFileTool, editFileTool, todoTool
 /**
  * Create a tool dispatch table bound to a workspace directory.
  * If a skillsDir is provided, the load_skill tool is added automatically.
+ * If a sandbox is provided, bash and file tools route through it.
  * Adding a tool = add a handler + add a schema entry. The loop never changes.
  */
 export function createToolDispatch(
   workdir: string = process.cwd(),
   skillsDir?: string,
+  sandbox?: Sandbox,
 ): ToolDispatch {
   const skillLoader = skillsDir ? new SkillLoader(skillsDir) : undefined;
 
   const todoManager = new TodoManager();
 
-  const dispatch: Record<string, ToolHandler> = {
-    bash: (args) => runBash(args.command as string, workdir),
-    read_file: (args) => runRead(args.path as string, workdir, args.limit as number | undefined),
-    write_file: (args) => runWrite(args.path as string, args.content as string, workdir),
-    edit_file: (args) =>
-      runEdit(args.path as string, args.old_text as string, args.new_text as string, workdir),
-    todo: (args) => todoManager.update(args.items as TodoItem[]),
-    ...(skillLoader && {
-      load_skill: (args) => skillLoader.getContent(args.name as string),
-    }),
-  };
+  const dispatch: Record<string, ToolHandler> = sandbox
+    ? {
+        bash: (args) => runBashWithSandbox(args.command as string, sandbox),
+        read_file: (args) =>
+          runReadWithSandbox(args.path as string, sandbox, args.limit as number | undefined),
+        write_file: (args) =>
+          runWriteWithSandbox(args.path as string, args.content as string, sandbox),
+        edit_file: (args) =>
+          runEditWithSandbox(
+            args.path as string,
+            args.old_text as string,
+            args.new_text as string,
+            sandbox,
+          ),
+        todo: (args) => todoManager.update(args.items as TodoItem[]),
+        ...(skillLoader && {
+          load_skill: (args) => skillLoader.getContent(args.name as string),
+        }),
+      }
+    : {
+        bash: (args) => runBash(args.command as string, workdir),
+        read_file: (args) =>
+          runRead(args.path as string, workdir, args.limit as number | undefined),
+        write_file: (args) => runWrite(args.path as string, args.content as string, workdir),
+        edit_file: (args) =>
+          runEdit(args.path as string, args.old_text as string, args.new_text as string, workdir),
+        todo: (args) => todoManager.update(args.items as TodoItem[]),
+        ...(skillLoader && {
+          load_skill: (args) => skillLoader.getContent(args.name as string),
+        }),
+      };
 
   const tools = skillLoader ? [...baseTools, loadSkillTool] : [...baseTools];
 

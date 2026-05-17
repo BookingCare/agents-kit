@@ -38,7 +38,12 @@ Current tool execution in `packages/agent` is synchronous and in-process:
 When no `Sandbox` is provided, tools behave as they do today:
 
 ```typescript
-const agent = new Agent({ model: claudeModel, tools });
+const agent = new Agent({
+  initialState: {
+    model: claudeModel,
+    tools,
+  },
+});
 ```
 
 ### Using the Sandbox
@@ -60,7 +65,12 @@ const sandbox = createSandbox({
 });
 
 const { tools } = createToolDispatch("/my-project", undefined, sandbox);
-const agent = new Agent({ model: claudeModel, tools });
+const agent = new Agent({
+  initialState: {
+    model: claudeModel,
+    tools,
+  },
+});
 ```
 
 ### Bash tool with sandbox
