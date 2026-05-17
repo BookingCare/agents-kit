@@ -15,3 +15,7 @@
 - Local sandbox resource limits for timeout, maxOutput, and best-effort maxMemory support
 - Local sandbox operation serialization so file validation and use cannot interleave across sandbox calls
 - Local sandbox process-group termination so timeout/output kills stop descendant commands, not just the shell
+
+### Fixed
+
+- Reject `maxMemory` values below 1 KiB instead of generating `ulimit -v 0`.

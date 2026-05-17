@@ -6,7 +6,7 @@ import { resolve, dirname, relative, isAbsolute } from "node:path";
 import { SkillLoader } from "./skill-loader.js";
 import { TodoManager } from "./todo-manager.js";
 import type { TodoItem } from "./todo-manager.js";
-import type { Sandbox } from "@bookingcare/infa";
+import type { Sandbox, SandboxResult } from "@bookingcare/infa";
 import type { ToolHandler, ToolDispatch } from "./types.js";
 
 export type { ToolHandler, ToolDispatch } from "./types.js";
@@ -121,10 +121,16 @@ function runEdit(path: string, oldText: string, newText: string, workdir: string
   return `Edited ${path}: replaced ${oldText.length} chars with ${newText.length} chars`;
 }
 
+function formatSandboxCommandError(result: SandboxResult): string {
+  const reason = result.killedBy ? ` (${result.killedBy})` : "";
+  const stderr = result.stderr ? `: ${result.stderr}` : "";
+  return `Command failed${reason} with exit code ${result.exitCode}${stderr}`;
+}
+
 async function runBashWithSandbox(command: string, sandbox: Sandbox): Promise<string> {
   const result = await sandbox.exec(command);
   if (result.exitCode !== 0 || result.killed) {
-    throw new Error(result.stderr || `Command failed with exit code ${result.exitCode}`);
+    throw new Error(formatSandboxCommandError(result));
   }
   return result.stdout || "(no output)";
 }

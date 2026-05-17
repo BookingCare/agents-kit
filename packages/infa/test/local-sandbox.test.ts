@@ -39,6 +39,14 @@ describe("LocalSandbox", () => {
     expect(result.killedBy).toBeUndefined();
   });
 
+  it("rejects maxMemory values smaller than 1 KiB", () => {
+    const workdir = createTempDir("infa-memory-");
+
+    expect(() => createSandbox({ kind: "local", workdir, maxMemory: 512 })).toThrow(
+      "Invalid maxMemory: 512. Must be at least 1024 bytes.",
+    );
+  });
+
   it("exec kills a long-running command on timeout", async () => {
     const workdir = createTempDir("infa-timeout-");
     const sandbox = createSandbox({ kind: "local", workdir });

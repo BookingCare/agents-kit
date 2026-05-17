@@ -13,6 +13,10 @@
 - Tool dispatch handlers are async-aware so sandbox-backed commands can be awaited in the agent loop
 - Sandboxed `read_file` preserves the existing 50 KB default cap when no explicit line limit is provided
 
+### Fixed
+
+- Bash sandbox failures now include the sandbox kill reason and exit code in thrown errors.
+
 ## [0.2.0] - 2026-05-13
 
 ### Added

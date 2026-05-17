@@ -141,7 +141,7 @@ describe("sandbox dispatch integration", () => {
 
     await expect(
       dispatchBundle.dispatch.bash({ command: `"${process.execPath}" -e "while(true){}"` }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/timeout.*exit code/i);
   });
 
   it("enforces output limits through the dispatch flow", async () => {
@@ -153,6 +153,6 @@ describe("sandbox dispatch integration", () => {
       dispatchBundle.dispatch.bash({
         command: `"${process.execPath}" -e "process.stdout.write('x'.repeat(5000))"`,
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/output.*exit code/i);
   });
 });

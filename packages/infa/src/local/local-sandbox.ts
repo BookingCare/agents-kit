@@ -6,14 +6,14 @@ import type { Sandbox, SandboxExecOptions, SandboxOptions, SandboxResult } from 
 import { resolveSandboxPath } from "./path.js";
 
 const KILL_GRACE_MS = 1000;
-const DEFAULT_MEMORY_LIMIT_KB_DIVISOR = 1024;
+const MEMORY_LIMIT_BYTES_PER_KIB = 1024;
 
 function formatExecCommand(command: string, maxMemory?: number): string {
   if (maxMemory === undefined || process.platform === "win32") {
     return command;
   }
 
-  const memoryLimitKb = Math.floor(maxMemory / DEFAULT_MEMORY_LIMIT_KB_DIVISOR);
+  const memoryLimitKb = Math.floor(maxMemory / MEMORY_LIMIT_BYTES_PER_KIB);
   return `ulimit -v ${memoryLimitKb}; ${command}`;
 }
 
@@ -51,6 +51,12 @@ export class LocalSandbox implements Sandbox {
   private operationQueue: Promise<void> = Promise.resolve();
 
   constructor(options: SandboxOptions) {
+    if (options.maxMemory !== undefined && options.maxMemory < MEMORY_LIMIT_BYTES_PER_KIB) {
+      throw new Error(
+        `Invalid maxMemory: ${options.maxMemory}. Must be at least ${MEMORY_LIMIT_BYTES_PER_KIB} bytes.`,
+      );
+    }
+
     this.workdir = resolve(options.workdir);
     mkdirSync(this.workdir, { recursive: true });
     this.timeout = options.timeout;
