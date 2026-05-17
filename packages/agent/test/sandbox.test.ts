@@ -68,9 +68,9 @@ describe("sandbox dispatch integration", () => {
           {
             id: "tc1",
             name: "bash",
-            arguments: JSON.stringify({
+            arguments: {
               command: `"${process.execPath}" -e "process.stdout.write('done')"`,
-            }),
+            },
           },
         ],
         stopReason: "toolUse",

@@ -13,7 +13,8 @@
     "release:patch": "pnpm -r exec -- npm version patch --no-git-tag-version && node scripts/sync-versions.mjs",
     "release:minor": "pnpm -r exec -- npm version minor --no-git-tag-version && node scripts/sync-versions.mjs",
     "release:major": "pnpm -r exec -- npm version major --no-git-tag-version && node scripts/sync-versions.mjs",
-    "publish": "pnpm --filter @bookingcare/ai publish --access public --no-git-checks",
+    "publish": "pnpm run publish:packages",
+    "publish:packages": "node scripts/publish-packages.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
