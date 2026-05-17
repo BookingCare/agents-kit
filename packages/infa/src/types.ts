@@ -19,7 +19,7 @@ export interface SandboxResult {
   stderr: string;
   exitCode: number;
   killed?: boolean;
-  killedBy?: "timeout" | "memory" | "output";
+  killedBy?: "timeout" | "output";
 }
 
 export interface Sandbox {

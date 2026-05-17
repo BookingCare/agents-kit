@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `SandboxResult.killedBy` no longer advertises `memory`; the local sandbox only reports `timeout` and `output`.
+
 ### Added
 
 - `@bookingcare/infa` sandbox package — factory-created `Sandbox` abstraction for process-isolated tool execution with resource limits
