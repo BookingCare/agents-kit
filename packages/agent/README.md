@@ -63,12 +63,18 @@ File paths are sandboxed to `workdir` — path traversal attempts throw.
 
 ### Sandbox integration
 
-Pass a sandbox from `@bookingcare/infa` to route bash and file tools through process-isolated execution:
+Pass a sandbox from `@bookingcare/infa` to route bash and file tools through process-isolated execution. Local sandboxes do not inherit the parent environment, so include a safe `PATH` (and on Windows, `SystemRoot`/`ComSpec` when needed) if commands need external binaries:
 
 ```typescript
 import { createSandbox } from "@bookingcare/infa";
 
-const sandbox = createSandbox({ kind: "local", workdir: "/workspace" });
+const sandbox = createSandbox({
+  kind: "local",
+  workdir: "/workspace",
+  env: {
+    PATH: "/usr/local/bin:/usr/bin:/bin",
+  },
+});
 const { tools, dispatch } = createToolDispatch("/workspace", undefined, sandbox);
 ```
 

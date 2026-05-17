@@ -5,6 +5,7 @@
 ### Changed
 
 - `ContextManager` now uses actual `usage.input` from assistant messages instead of estimating all tokens (more accurate for assistant messages)
+- Documented the explicit env and PATH requirements for local sandboxes in the README.
 
 ### Added
 
@@ -21,6 +22,7 @@
 ### Fixed
 
 - Bash sandbox failures now include the sandbox kill reason and exit code in thrown errors.
+- Restored the sandbox test helper import so package type-check passes.
 
 ## [0.2.0] - 2026-05-13
 
