@@ -11,9 +11,11 @@
  * 2. Bump version via npm run version:xxx or set an explicit version
  * 3. Update CHANGELOG.md files: [Unreleased] -> [version] - date
  * 4. Commit and tag
- * 5. Publish to npm
+ * 5. Publish packages to npm
  * 6. Add new [Unreleased] section to changelogs
  * 7. Commit
+ * 8. Push to remote
+ * 9. Create GitHub release from the pushed tag
  */
 
 import { execSync } from "child_process";
@@ -173,7 +175,7 @@ console.log();
 
 // 5. Publish
 console.log("Publishing to npm...");
-run("pnpm run publish");
+run("pnpm run publish:packages");
 console.log();
 
 // 6. Add new [Unreleased] sections
@@ -191,6 +193,11 @@ console.log();
 console.log("Pushing to remote...");
 run("git push origin main");
 run(`git push origin v${version}`);
+console.log();
+
+// 9. Create GitHub release
+console.log("Creating GitHub release...");
+run(`gh release create v${version} --title v${version} --generate-notes --verify-tag`);
 console.log();
 
 console.log(`=== Released v${version} ===`);
