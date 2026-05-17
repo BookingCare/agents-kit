@@ -1,6 +1,6 @@
 {
   "name": "@bookingcare/infa",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Sandbox execution for process-isolated agent tools with resource limits",
   "license": "MIT",
   "type": "module",

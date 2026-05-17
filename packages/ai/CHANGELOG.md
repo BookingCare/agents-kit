@@ -1,6 +1,6 @@
 # @bookingcare/ai
 
-## [Unreleased]
+## [0.3.0] - 2026-05-17
 
 ### Breaking Changes
 
