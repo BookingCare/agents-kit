@@ -24,11 +24,8 @@ importers:
   packages/agent:
     dependencies:
       '@bookingcare/ai':
-        specifier: workspace:*
-        version: link:../ai
-      '@bookingcare/db':
-        specifier: workspace:*
-        version: link:../db
+        specifier: ^0.3.0
+        version: 0.3.0
       '@bookingcare/infa':
         specifier: workspace:*
         version: link:../infa
@@ -77,8 +74,8 @@ importers:
   packages/db:
     dependencies:
       '@bookingcare/ai':
-        specifier: workspace:*
-        version: link:../ai
+        specifier: ^0.3.0
+        version: 0.3.0
     devDependencies:
       '@bookingcare/tsconfig':
         specifier: workspace:*
@@ -94,6 +91,10 @@ importers:
         version: 4.1.5(@types/node@25.6.2)(vite@8.0.11(@types/node@25.6.2))
 
   packages/infa:
+    dependencies:
+      '@bookingcare/ai':
+        specifier: workspace:*
+        version: link:../ai
     devDependencies:
       '@bookingcare/tsconfig':
         specifier: workspace:*
@@ -111,6 +112,9 @@ importers:
   packages/tsconfig: {}
 
 packages:
+
+  '@bookingcare/ai@0.3.0':
+    resolution: {integrity: sha512-bdgNs3kIV9oy4ffQAbWl3w35tKpSednqAUYAdf4QthMc9tm2h+FvnwU+qP/rusyKRN4hc47LyBdVgr+QsyJj8w==}
 
   '@emnapi/core@1.10.0':
     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
@@ -612,6 +616,15 @@ packages:
     hasBin: true
 
 snapshots:
+
+  '@bookingcare/ai@0.3.0':
+    dependencies:
+      '@sinclair/typebox': 0.34.49
+      openai: 6.37.0
+      partial-json: 0.1.7
+    transitivePeerDependencies:
+      - ws
+      - zod
 
   '@emnapi/core@1.10.0':
     dependencies:

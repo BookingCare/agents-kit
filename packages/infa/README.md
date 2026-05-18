@@ -29,3 +29,7 @@ const result = await sandbox.exec("echo hello");
 Sandboxed processes do not inherit the parent environment. Pass a safe `PATH` (and on Windows, `SystemRoot`/`ComSpec`) in `env` when commands need external binaries.
 
 `Sandbox` also exposes `readFile()`, `writeFile()`, and `editFile()` for workspace-scoped file operations.
+
+## Persistence
+
+`@bookingcare/infa` also exports persistence helpers and `JSONStore` from the root package and the `./persistence` subpath.
