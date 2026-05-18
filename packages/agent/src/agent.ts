@@ -15,6 +15,7 @@ import {
 import type { Store, AgentInfo } from "@bookingcare/infra";
 import { NotFoundError, serializeAgentState, createTodoSnapshot } from "@bookingcare/infra";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.js";
+import { EventBus } from "./event-bus.js";
 import { BreakpointManager } from "./breakpoint-manager.js";
 import type { TodoManager } from "./todo-manager.js";
 import type {
@@ -34,6 +35,7 @@ import type {
   BreakpointStage,
   QueueMode,
   StreamFn,
+  ChannelListener,
   StreamingAssistantMessage,
   ToolExecutionMode,
 } from "./types.js";
@@ -198,9 +200,7 @@ type ActiveRun = {
  */
 export class Agent {
   private _state: MutableAgentState;
-  private readonly listeners = new Set<
-    (event: AgentEvent, signal: AbortSignal) => Promise<void> | void
-  >();
+  public readonly eventBus: EventBus;
   private readonly steeringQueue: PendingMessageQueue;
   private readonly followUpQueue: PendingMessageQueue;
 
@@ -245,6 +245,7 @@ export class Agent {
 
   constructor(options: AgentOptions = {}) {
     this._state = createMutableAgentState(options.initialState);
+    this.eventBus = new EventBus();
     this.convertToLlm = options.convertToLlm ?? defaultConvertToLlm;
     this.transformContext = options.transformContext;
     this.streamFn = options.streamFn ?? streamSimple;
@@ -355,18 +356,26 @@ export class Agent {
   /**
    * Subscribe to agent lifecycle events.
    *
-   * Listener promises are awaited in subscription order and are included in
-   * the current run's settlement. Listeners also receive the active abort
-   * signal for the current run.
-   *
-   * `agent_end` is the final emitted event for a run, but the agent does not
-   * become idle until all awaited listeners for that event have settled.
+   * @deprecated Use `agent.eventBus.on(channel, listener)` for targeted subscriptions.
    */
   subscribe(
     listener: (event: AgentEvent, signal: AbortSignal) => Promise<void> | void,
   ): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    const lifecycleListener: ChannelListener<"lifecycle"> = (event, signal) =>
+      listener(event, signal);
+    const streamingListener: ChannelListener<"streaming"> = (event, signal) =>
+      listener(event, signal);
+    const toolsListener: ChannelListener<"tools"> = (event, signal) => listener(event, signal);
+
+    const unsubscribeLifecycle = this.eventBus.on("lifecycle", lifecycleListener);
+    const unsubscribeStreaming = this.eventBus.on("streaming", streamingListener);
+    const unsubscribeTools = this.eventBus.on("tools", toolsListener);
+
+    return () => {
+      unsubscribeLifecycle();
+      unsubscribeStreaming();
+      unsubscribeTools();
+    };
   }
 
   /**
@@ -836,18 +845,7 @@ export class Agent {
     if (!signal) {
       throw new Error("Agent listener invoked outside active run");
     }
-    for (const listener of this.listeners) {
-      try {
-        await listener(event, signal);
-      } catch (e) {
-        // Swallow listener errors during agent_end to prevent masking the original error
-        if (event.type !== "agent_end") {
-          throw e;
-        }
-        console.warn(
-          `[agent] listener error during agent_end: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      }
-    }
+
+    await this.eventBus.emit(event, signal);
   }
 }

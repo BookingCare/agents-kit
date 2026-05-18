@@ -104,11 +104,11 @@ agent.eventBus.once("streaming", (event) => {
 
 ### Channel event mapping
 
-| Channel     | Event Types                                              |
-| ----------- | -------------------------------------------------------- |
-| `lifecycle` | `agent_end`                                              |
-| `streaming` | `message_start`, `message_update`, `message_end`         |
-| `tools`     | `tool_execution_start`, `tool_execution_end`, `turn_end` |
+| Channel     | Event Types                                                                   |
+| ----------- | ----------------------------------------------------------------------------- |
+| `lifecycle` | `context_trimmed`, `agent_end`                                                |
+| `streaming` | `message_start`, `message_update`, `message_end`                              |
+| `tools`     | `permission_needed`, `tool_execution_start`, `tool_execution_end`, `turn_end` |
 
 ### Subscribing to all events (backward compatibility)
 
@@ -148,7 +148,7 @@ The returned function removes the listener from only that channel.
 
 7. Listeners within a channel execute in subscription order
 8. All listener promises are awaited sequentially within each channel
-9. Cross-channel ordering is not guaranteed (channels may execute in parallel or sequence)
+9. Cross-channel ordering is not guaranteed across different event types
 10. AbortSignal is passed to all listeners (backward compatible with `subscribe` signature)
 
 ### Types and API
@@ -161,7 +161,7 @@ The returned function removes the listener from only that channel.
 
 14. Subscribing after a run starts receives subsequent events on that channel
 15. Unsubscribing during event emission does not affect the current emission
-16. Listener that throws aborts the current subscription group, but other subscription groups still receive the same event
+16. Listener that throws aborts the current channel; `agent_end` listeners continue after logging the failure
 17. No-op unsubscribe if listener was already removed
 18. `once` listener unsubscribes itself after its first invocation completes
 
@@ -178,10 +178,10 @@ Add `event-bus.test.ts`:
 - Listeners execute in subscription order per channel
 - Unsubscribe removes only the specified listener
 - Unsubscribe of non-existent listener is a no-op
-- Listener exceptions abort the current subscription group without blocking legacy `agent.subscribe()` listeners
-- `agent_end` routes to `lifecycle` channel
+- Listener exceptions abort the current channel
+- `agent_end` and `context_trimmed` route to `lifecycle` channel
 - `message_start`/`message_update`/`message_end` route to `streaming` channel
-- `tool_execution_start`/`tool_execution_end`/`turn_end` route to `tools` channel
+- `permission_needed`/`tool_execution_start`/`tool_execution_end`/`turn_end` route to `tools` channel
 - Backward compatible: `agent.subscribe()` receives all events correctly
 
 ### Integration tests
@@ -202,13 +202,3 @@ Add `event-bus.test.ts`:
 3. Verify each channel subscriber receives only its mapped events
 4. Verify general subscriber receives all events
 5. Verify unsubscribe works correctly
-
-## Open questions
-
-1. **Should channels execute in parallel or sequence?** Sequential per-channel is simpler and matches current behavior. Parallel could improve throughput but risks ordering issues for stateful listeners.
-
-2. **Should the `turn_end` event be split between tools and streaming?** Currently `turn_end` contains both the assistant message and tool results. It is mapped to `tools` since tool results are primary, but the assistant message is secondary.
-
-3. **Should we add a `"debug"` channel for future extensibility?** This would make adding channels easier but introduces a catch-all that re-creates the firehose problem.
-
-4. **What is the unsubscribe behavior during emission?** If listener A unsubscribes listener B during emission, should B still receive the current event? (Standard pattern: yes, since the listener collection was snapshotted at emission start.)

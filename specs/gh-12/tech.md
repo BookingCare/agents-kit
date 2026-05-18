@@ -19,9 +19,9 @@ The `Agent` class stores listeners in a plain `Set` and passes every event to ev
 ### packages/agent/src/agent.ts
 
 - `Agent` class (line ~185-end)
-- `listeners` (line ~195-197): `Set<(event: AgentEvent, signal: AbortSignal) => Promise<void> | void>` — single firehose listener set
-- `subscribe()` (line ~225-240): Adds to `listeners`, returns unsubscribe function
-- `processEvents()` (line ~470-530): Iterates `listeners` and awaits them in Set insertion order
+- `eventBus` property: typed multi-channel listener registry
+- `subscribe()` (line ~225-240): Registers wrappers on all three channels and returns a combined unsubscribe function
+- `processEvents()` (line ~470-530): Updates local state, then awaits `eventBus.emit(event, signal)`
 - `runWithLifecycle()` (line ~420-470): Provides the `AbortSignal` to `processEvents`
 
 ## Current state
@@ -31,11 +31,10 @@ The `Agent` class stores listeners in a plain `Set` and passes every event to ev
 ```
 Agent processEvents(event)
   → switch(event.type) to update internal state
-  → for each listener in listeners Set:
-    → await listener(event, signal)
+  → await eventBus.emit(event, signal)
 ```
 
-All listeners receive all events. The `Set` preserves insertion order.
+Each event is routed to exactly one channel. Channel listeners preserve insertion order.
 
 ### Listener contract
 
@@ -43,7 +42,7 @@ All listeners receive all events. The `Set` preserves insertion order.
 (event: AgentEvent, signal: AbortSignal) => Promise<void> | void
 ```
 
-The `subscribe()` return value removes the listener from the Set.
+`Agent.subscribe()` registers the same callback on all three channels and returns a combined unsubscribe function.
 
 ## Proposed changes
 
@@ -63,99 +62,66 @@ export type ChannelListener = (event: AgentEvent, signal: AbortSignal) => Promis
 import type { AgentEvent, Channel, ChannelListener } from "./types.js";
 
 export class EventBus {
-  private channels: Record<Channel, Set<ChannelListener>> = {
+  private readonly channels: Record<Channel, Set<ChannelListener>> = {
     lifecycle: new Set(),
     streaming: new Set(),
     tools: new Set(),
   };
 
-  private legacyListeners = new Set<ChannelListener>();
-
-  private static getChannel(event: AgentEvent): Channel | undefined {
-    switch (event.type) {
-      case "agent_end":
-        return "lifecycle";
-      case "message_start":
-      case "message_update":
-      case "message_end":
-        return "streaming";
-      case "tool_execution_start":
-      case "tool_execution_end":
-      case "turn_end":
-        return "tools";
-      default:
-        return undefined;
-    }
-  }
-
   on(channel: Channel, listener: ChannelListener): () => void {
     this.channels[channel].add(listener);
-    return () => this.channels[channel].delete(listener);
+    return () => {
+      this.channels[channel].delete(listener);
+    };
   }
 
   once(channel: Channel, listener: ChannelListener): () => void {
-    let triggered = false;
     const wrapped: ChannelListener = async (event, signal) => {
-      if (triggered) return;
-      triggered = true;
-      this.channels[channel].delete(wrapped);
-      await listener(event, signal);
-    };
-    this.channels[channel].add(wrapped);
-    return () => this.channels[channel].delete(wrapped);
-  }
-
-  /** Backward compatibility: subscribe to ALL events. */
-  subscribeLegacy(listener: ChannelListener): () => void {
-    this.legacyListeners.add(listener);
-    return () => this.legacyListeners.delete(listener);
-  }
-
-  /** Remove all listeners from all channels and legacy set. */
-  clear(): void {
-    for (const channel of Object.values(this.channels)) {
-      channel.clear();
-    }
-    this.legacyListeners.clear();
-  }
-
-  /** Emit an event to its channel listeners and legacy listeners. */
-  async emit(event: AgentEvent, signal: AbortSignal): Promise<void> {
-    const channel = EventBus.getChannel(event);
-    let firstError: unknown | undefined;
-
-    const runListeners = async (listeners: Iterable<ChannelListener>): Promise<void> => {
-      for (const listener of Array.from(listeners)) {
-        try {
-          await listener(event, signal);
-        } catch (error) {
-          if (firstError === undefined) {
-            firstError = error;
-          }
-          break;
-        }
+      try {
+        await listener(event, signal);
+      } finally {
+        this.channels[channel].delete(wrapped);
       }
     };
 
-    if (channel) {
-      await runListeners(this.channels[channel]);
-    }
+    this.channels[channel].add(wrapped);
+    return () => {
+      this.channels[channel].delete(wrapped);
+    };
+  }
 
-    await runListeners(this.legacyListeners);
+  async emit(event: AgentEvent, signal: AbortSignal): Promise<void> {
+    const listeners = Array.from(this.channels[channelForEvent(event)]);
 
-    if (firstError !== undefined) {
-      throw firstError;
+    for (const listener of listeners) {
+      try {
+        await listener(event, signal);
+      } catch (error) {
+        if (event.type === "agent_end") {
+          console.warn(
+            `[agent] listener error during agent_end: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          continue;
+        }
+
+        throw error;
+      }
     }
   }
 }
 ```
 
+`channelForEvent(event)` routes:
+
+- `lifecycle`: `context_trimmed`, `agent_end`
+- `streaming`: `message_start`, `message_update`, `message_end`
+- `tools`: `permission_needed`, `tool_execution_start`, `tool_execution_end`, `turn_end`
+
 This design:
 
 - `eventBus.on(channel, listener)` → channel-specific, only receives that channel's events
 - `eventBus.once(channel, listener)` → same, but auto-removes after first call
-- `eventBus.subscribeLegacy(listener)` → all events (backward compat)
-- `eventBus.emit(event, signal)` → routes to the matching channel first, then legacy listeners; each subscription group aborts on its first error and the first error is rethrown after both groups have been given the event
+- `eventBus.emit(event, signal)` → routes to the matching channel, preserves listener order, and matches existing `agent_end` error-swallowing behavior
 
 ### Agent class changes (packages/agent/src/agent.ts)
 
@@ -164,8 +130,6 @@ This design:
 ```typescript
 class Agent {
   public readonly eventBus: EventBus;
-  // Replace the existing `listeners` Set
-  // private readonly listeners = new Set<...>(); // REMOVE
 
   constructor(options: AgentOptions = {}) {
     // ... existing ...
@@ -178,13 +142,25 @@ class Agent {
 
 ```typescript
 /**
- * Subscribe to agent lifecycle events (receives all events).
+ * Subscribe to agent lifecycle events.
  * @deprecated Use `agent.eventBus.on(channel, listener)` for targeted subscriptions.
  */
 subscribe(
   listener: (event: AgentEvent, signal: AbortSignal) => Promise<void> | void,
 ): () => void {
-  return this.eventBus.subscribeLegacy(listener);
+  const lifecycleListener = (event: AgentEvent, signal: AbortSignal) => listener(event, signal);
+  const streamingListener = (event: AgentEvent, signal: AbortSignal) => listener(event, signal);
+  const toolsListener = (event: AgentEvent, signal: AbortSignal) => listener(event, signal);
+
+  const unsubscribeLifecycle = this.eventBus.on("lifecycle", lifecycleListener);
+  const unsubscribeStreaming = this.eventBus.on("streaming", streamingListener);
+  const unsubscribeTools = this.eventBus.on("tools", toolsListener);
+
+  return () => {
+    unsubscribeLifecycle();
+    unsubscribeStreaming();
+    unsubscribeTools();
+  };
 }
 ```
 
@@ -193,12 +169,6 @@ subscribe(
 Replace the listener iteration at the bottom of `processEvents`:
 
 ```typescript
-// OLD:
-// for (const listener of this.listeners) {
-//   try { await listener(event, signal); } catch (e) { ... }
-// }
-
-// NEW:
 if (!this.activeRun) {
   throw new Error("Agent listener invoked outside active run");
 }
@@ -228,17 +198,13 @@ User: agent.eventBus.on("streaming", streamHandler)
 User: agent.prompt("Hello")
   → loop runs
   → message_start event
-    → processEvents calls eventBus.emit(event, signal)
-      → getChannel("message_start") → "streaming"
-      → streamHandler(event, signal) called
-      → toolHandler NOT called (different channel)
+    → streamHandler(event, signal) called
+    → toolHandler NOT called (different channel)
   → tool_execution_start event
-    → getChannel("tool_execution_start") → "tools"
     → toolHandler called
     → streamHandler NOT called
   → agent_end event
-    → getChannel("agent_end") → "lifecycle"
-    → neither handler called (they subscribed to different channels)
+    → lifecycle listeners run
 ```
 
 ### Legacy subscription
@@ -248,17 +214,17 @@ User: agent.subscribe(legacyHandler)
 User: agent.prompt("Hello")
   → loop runs
   → any event
-    → eventBus.emit routes to channel-specific listeners
-    → legacyHandler is ALSO called via legacyListeners
+    → legacyHandler is registered on all three channels
+    → receives each event once through the matching channel
 ```
 
 ## Risks and mitigations
 
 ### Risk 1: Breaking listener error semantics
 
-**Problem**: A channel listener failure must not prevent backward-compatible `agent.subscribe()` handlers from seeing the same event, but the failure still needs to surface.
+**Problem**: Listener errors on `agent_end` should not mask the run completion path.
 
-**Mitigation**: Keep channel listeners and legacy listeners in separate subscription groups. Each group aborts on its first failing listener, but `EventBus.emit()` always gives both groups a chance to observe the event and rethrows the first error after delivery completes. `agent_end` uses the same path as every other event.
+**Mitigation**: Preserve the existing `agent_end` behavior by logging and continuing after listener failures during lifecycle delivery.
 
 ### Risk 2: Memory leak from un-removed listeners
 
@@ -268,9 +234,9 @@ User: agent.prompt("Hello")
 
 ### Risk 3: Cross-channel ordering
 
-**Problem**: With separate channel sets, the relative ordering of a `streaming` listener and a `tools` listener is undefined.
+**Problem**: With separate channel sets, the relative ordering of channel-specific listeners is undefined across channels.
 
-**Mitigation**: Document that channel execution order is not guaranteed. Consumers that need ordering should use `agent.subscribe()` (legacy) or subscribe to a single channel.
+**Mitigation**: Document that channel execution order is not guaranteed. Consumers that need ordering should use a single channel or `agent.subscribe()`.
 
 ### Risk 4: Type narrowing for channel listeners
 
@@ -284,14 +250,14 @@ User: agent.prompt("Hello")
 
 - `on("streaming", fn)` receives only streaming events
 - `on("tools", fn)` receives only tool events
-- `on("lifecycle", fn)` receives only agent_end
+- `on("lifecycle", fn)` receives `context_trimmed` and `agent_end`
+- `permission_needed` routes to `tools`
 - `once("streaming", fn)` fires once and unsubscribes
-- `subscribeLegacy(fn)` receives all events
+- `agent.subscribe(fn)` receives all events via all channels
 - Unsubscribe removes from correct channel
-- Listener error aborts the current subscription group but still allows the other group to receive the same event
-- Listener errors are rethrown after event delivery completes
-- Empty channel emits to no channel-specific listeners
-- Multiple listeners on same channel execute in order
+- Listener error aborts the current channel when it is not `agent_end`
+- `agent_end` listener errors are logged and do not stop later lifecycle listeners
+- Multiple listeners on the same channel execute in order
 
 ### Regression tests
 
@@ -301,6 +267,6 @@ User: agent.prompt("Hello")
 
 ## Follow-ups
 
-1. **Typed channel-specific events**: Refine `ChannelListener` so `on("streaming", fn)` strongly types `event` as streaming events only (requires narrowing the event type in the handler signature).
+1. **Typed channel-specific events**: Refine `ChannelListener` so `on("streaming", fn)` strongly types `event` as streaming events only.
 2. **Additional channels**: Consider adding `"debug"`, `"telemetry"`, or `"persistence"` channels for specialized consumers.
 3. **Event buffering**: Buffer events emitted before any listeners are attached, replay on first subscription.
