@@ -161,7 +161,7 @@ The returned function removes the listener from only that channel.
 
 14. Subscribing after a run starts receives subsequent events on that channel
 15. Unsubscribing during event emission does not affect the current emission
-16. Listener that throws aborts the current channel's emission but not other channels
+16. Listener that throws aborts the current subscription group, but other subscription groups still receive the same event
 17. No-op unsubscribe if listener was already removed
 18. `once` listener unsubscribes itself after its first invocation completes
 
@@ -178,7 +178,7 @@ Add `event-bus.test.ts`:
 - Listeners execute in subscription order per channel
 - Unsubscribe removes only the specified listener
 - Unsubscribe of non-existent listener is a no-op
-- Listener exceptions abort that channel's emission
+- Listener exceptions abort the current subscription group without blocking legacy `agent.subscribe()` listeners
 - `agent_end` routes to `lifecycle` channel
 - `message_start`/`message_update`/`message_end` route to `streaming` channel
 - `tool_execution_start`/`tool_execution_end`/`turn_end` route to `tools` channel
@@ -187,7 +187,7 @@ Add `event-bus.test.ts`:
 ### Integration tests
 
 - Agent with channel subscriptions completes a full turn correctly
-- Multiple channel subscribers coexist without interference
+- Multiple channel subscribers and legacy subscribers coexist without interference
 
 ### Regression tests
 

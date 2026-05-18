@@ -120,37 +120,31 @@ export class EventBus {
   }
 
   /** Emit an event to its channel listeners and legacy listeners. */
-  async emit(
-    event: AgentEvent,
-    signal: AbortSignal,
-    errorMode: "throw" | "log-and-continue" = "throw",
-  ): Promise<void> {
+  async emit(event: AgentEvent, signal: AbortSignal): Promise<void> {
     const channel = EventBus.getChannel(event);
+    let firstError: unknown | undefined;
 
-    // Emit to channel-specific subscribers
-    if (channel) {
-      for (const listener of Array.from(this.channels[channel])) {
+    const runListeners = async (listeners: Iterable<ChannelListener>): Promise<void> => {
+      for (const listener of Array.from(listeners)) {
         try {
           await listener(event, signal);
-        } catch (e) {
-          if (errorMode === "throw") {
-            throw e;
+        } catch (error) {
+          if (firstError === undefined) {
+            firstError = error;
           }
-          console.warn(`[agent] listener error: ${e instanceof Error ? e.message : String(e)}`);
+          break;
         }
       }
+    };
+
+    if (channel) {
+      await runListeners(this.channels[channel]);
     }
 
-    // Emit to legacy subscribers (all events)
-    for (const listener of Array.from(this.legacyListeners)) {
-      try {
-        await listener(event, signal);
-      } catch (e) {
-        if (errorMode === "throw") {
-          throw e;
-        }
-        console.warn(`[agent] listener error: ${e instanceof Error ? e.message : String(e)}`);
-      }
+    await runListeners(this.legacyListeners);
+
+    if (firstError !== undefined) {
+      throw firstError;
     }
   }
 }
@@ -161,7 +155,7 @@ This design:
 - `eventBus.on(channel, listener)` → channel-specific, only receives that channel's events
 - `eventBus.once(channel, listener)` → same, but auto-removes after first call
 - `eventBus.subscribeLegacy(listener)` → all events (backward compat)
-- `eventBus.emit(event, signal, errorMode)` → routes to channel + legacy with configurable error handling
+- `eventBus.emit(event, signal)` → routes to the matching channel first, then legacy listeners; each subscription group aborts on its first error and the first error is rethrown after both groups have been given the event
 
 ### Agent class changes (packages/agent/src/agent.ts)
 
@@ -209,9 +203,7 @@ if (!this.activeRun) {
   throw new Error("Agent listener invoked outside active run");
 }
 
-// Preserve existing error handling: agent_end swallows errors, other events throw
-const errorMode = event.type === "agent_end" ? "log-and-continue" : "throw";
-await this.eventBus.emit(event, signal, errorMode);
+await this.eventBus.emit(event, signal);
 ```
 
 ### Export changes (packages/agent/src/index.ts)
@@ -264,9 +256,9 @@ User: agent.prompt("Hello")
 
 ### Risk 1: Breaking listener error semantics
 
-**Problem**: The existing per-listener error handling for `agent_end` must be preserved.
+**Problem**: A channel listener failure must not prevent backward-compatible `agent.subscribe()` handlers from seeing the same event, but the failure still needs to surface.
 
-**Mitigation**: Use `errorMode` parameter on `EventBus.emit`. During `agent_end`, use `"log-and-continue"` mode which catches per-listener errors and logs them without aborting. For all other events, use `"throw"` mode which aborts on first error. This matches the current behavior exactly.
+**Mitigation**: Keep channel listeners and legacy listeners in separate subscription groups. Each group aborts on its first failing listener, but `EventBus.emit()` always gives both groups a chance to observe the event and rethrows the first error after delivery completes. `agent_end` uses the same path as every other event.
 
 ### Risk 2: Memory leak from un-removed listeners
 
@@ -296,8 +288,8 @@ User: agent.prompt("Hello")
 - `once("streaming", fn)` fires once and unsubscribes
 - `subscribeLegacy(fn)` receives all events
 - Unsubscribe removes from correct channel
-- Listener error in `throw` mode aborts emission
-- Listener error in `log-and-continue` mode continues emission
+- Listener error aborts the current subscription group but still allows the other group to receive the same event
+- Listener errors are rethrown after event delivery completes
 - Empty channel emits to no channel-specific listeners
 - Multiple listeners on same channel execute in order
 
