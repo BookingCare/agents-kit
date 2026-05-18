@@ -15,6 +15,7 @@ export type {
   PermissionDecision,
   PermissionScope,
   PermissionNeededEvent,
+  ContextTrimmedEvent,
   AgentLoopTurnUpdate,
   AgentLoopConfig,
   AgentMessage,
@@ -24,6 +25,8 @@ export type {
   AgentState,
   AgentEvent,
   AgentContext,
+  Channel,
+  ChannelListener,
   BreakpointStage,
   BreakpointCondition,
   BreakpointHit,
@@ -47,6 +50,7 @@ export { TodoManager } from "./todo-manager.js";
 export type { TodoItem } from "./todo-manager.js";
 export { Agent } from "./agent.js";
 export type { AgentOptions } from "./agent.js";
+export { EventBus } from "./event-bus.js";
 export { PermissionManager, DEFAULT_RULES } from "./permission-manager.js";
 export { BreakpointManager } from "./breakpoint-manager.js";
 export { ContextManager, slidingWindowStrategy } from "./context-manager.js";

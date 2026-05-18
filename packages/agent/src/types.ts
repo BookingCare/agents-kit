@@ -254,6 +254,10 @@ export type AgentEvent =
   | PermissionNeededEvent
   | ContextTrimmedEvent;
 
+export type Channel = "lifecycle" | "streaming" | "tools";
+
+export type ChannelListener = (event: AgentEvent, signal: AbortSignal) => Promise<void> | void;
+
 export interface AgentContext {
   systemPrompt: string;
   messages: AgentMessage[];

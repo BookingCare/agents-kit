@@ -196,11 +196,16 @@ const agent = new Agent({
   },
 });
 
-// Subscribe to events
-agent.subscribe((event, signal) => {
+// Subscribe to specific channels
+agent.eventBus.on("streaming", (event) => {
   if (event.type === "message_end") {
     console.log("Got message:", event.message);
   }
+});
+
+// Legacy API still works, but is deprecated
+agent.subscribe((event) => {
+  console.log(event.type);
 });
 
 // Prompt the agent
@@ -212,16 +217,13 @@ console.log(agent.state.messages);
 
 ### Events
 
-| Event                  | Description                                |
-| ---------------------- | ------------------------------------------ |
-| `message_start`        | Stream started (partial message)           |
-| `message_update`       | Text delta received (partial message)      |
-| `message_end`          | Full message received                      |
-| `permission_needed`    | Tool call is waiting for allow/deny        |
-| `tool_execution_start` | Tool execution began                       |
-| `tool_execution_end`   | Tool execution finished                    |
-| `turn_end`             | Assistant message + tool results processed |
-| `agent_end`            | Agent finished (full transcript)           |
+| Channel     | Event types                                                                   |
+| ----------- | ----------------------------------------------------------------------------- |
+| `lifecycle` | `context_trimmed`, `agent_end`                                                |
+| `streaming` | `message_start`, `message_update`, `message_end`                              |
+| `tools`     | `permission_needed`, `tool_execution_start`, `tool_execution_end`, `turn_end` |
+
+`agent.eventBus.once(channel, listener)` is available for one-shot subscriptions. `agent.subscribe()` remains available for backward compatibility and subscribes the handler to all channels.
 
 ### PermissionManager
 
