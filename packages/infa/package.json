@@ -5,14 +5,14 @@
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
-  "types": "./src/index.ts",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./persistence": {
-      "types": "./src/persistence/index.ts",
+      "types": "./dist/persistence/index.d.ts",
       "default": "./dist/persistence/index.js"
     }
   },

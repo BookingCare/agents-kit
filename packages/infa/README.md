@@ -32,4 +32,4 @@ Sandboxed processes do not inherit the parent environment. Pass a safe `PATH` (a
 
 ## Persistence
 
-`@bookingcare/infa` also exports persistence helpers and `JSONStore` from the root package and the `./persistence` subpath.
+`@bookingcare/infa` exports persistence helpers from the root package and the `./persistence` subpath.
