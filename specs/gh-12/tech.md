@@ -54,12 +54,6 @@ Add near `AgentEvent`:
 ```typescript
 export type Channel = "lifecycle" | "streaming" | "tools";
 
-export type ChannelEvent = {
-  lifecycle: Extract<AgentEvent, { type: "agent_end" }>;
-  streaming: Extract<AgentEvent, { type: "message_start" | "message_update" | "message_end" }>;
-  tools: Extract<AgentEvent, { type: "tool_execution_start" | "tool_execution_end" | "turn_end" }>;
-};
-
 export type ChannelListener = (event: AgentEvent, signal: AbortSignal) => Promise<void> | void;
 ```
 
@@ -68,80 +62,6 @@ export type ChannelListener = (event: AgentEvent, signal: AbortSignal) => Promis
 ```typescript
 import type { AgentEvent, Channel, ChannelListener } from "./types.js";
 
-export class EventBus {
-  private channels: Record<Channel, Set<ChannelListener>> = {
-    lifecycle: new Set(),
-    streaming: new Set(),
-    tools: new Set(),
-  };
-
-  private static route(event: AgentEvent): Channel | undefined {
-    switch (event.type) {
-      case "agent_end":
-        return "lifecycle";
-      case "message_start":
-      case "message_update":
-      case "message_end":
-        return "streaming";
-      case "tool_execution_start":
-      case "tool_execution_end":
-      case "turn_end":
-        return "tools";
-      default:
-        return undefined;
-    }
-  }
-
-  on(channel: Channel, listener: ChannelListener): () => void {
-    this.channels[channel].add(listener);
-    return () => this.channels[channel].delete(listener);
-  }
-
-  once(channel: Channel, listener: ChannelListener): () => void {
-    const wrapped: ChannelListener = (event, signal) => {
-      this.channels[channel].delete(wrapped);
-      return listener(event, signal);
-    };
-    this.channels[channel].add(wrapped);
-    return () => this.channels[channel].delete(wrapped);
-  }
-
-  async emit(event: AgentEvent, signal: AbortSignal): Promise<void> {
-    const channel = EventBus.route(event);
-    if (!channel) return;
-
-    const listeners = Array.from(this.channels[channel]);
-    // Also emit to legacy "all" subscribers
-    for (const listener of listeners) {
-      await listener(event, signal);
-    }
-  }
-
-  /** Emit to all legacy subscribers (cross-channel). Used by Agent.subscribe(). */
-  private legacyListeners = new Set<ChannelListener>();
-
-  addLegacyListener(listener: ChannelListener): () => void {
-    this.legacyListeners.add(listener);
-    return () => this.legacyListeners.delete(listener);
-  }
-
-  /** Emit to all listeners: channel-targeted + legacy. */
-  async emitAll(event: AgentEvent, signal: AbortSignal): Promise<void> {
-    await this.emit(event, signal);
-    for (const listener of Array.from(this.legacyListeners)) {
-      await listener(event, signal);
-    }
-  }
-}
-```
-
-Wait — this design has `emit` for channel-only and `emitAll` for channel + legacy. But the legacy subscribers also need events. The current `processEvents` calls listeners for every event. If we split into `emit` (channel) and `emitAll` (channel + legacy), we should always use `emitAll` in `processEvents` to preserve backward compatibility.
-
-Cleaner design: Always emit to both. The `EventBus.emit()` handles routing to the channel AND to legacy subscribers. The `Agent.subscribe` adds to legacy listeners.
-
-Actually, rethinking: The issue specifies backward compatibility as marking `subscribe` deprecated but functional. So `subscribe` should still work exactly like before, while `eventBus.on` is the new way.
-
-```typescript
 export class EventBus {
   private channels: Record<Channel, Set<ChannelListener>> = {
     lifecycle: new Set(),
@@ -200,19 +120,41 @@ export class EventBus {
   }
 
   /** Emit an event to its channel listeners and legacy listeners. */
-  async emit(event: AgentEvent, signal: AbortSignal): Promise<void> {
+  async emit(
+    event: AgentEvent,
+    signal: AbortSignal,
+    errorMode: "throw" | "log-and-continue" = "throw",
+  ): Promise<void> {
     const channel = EventBus.getChannel(event);
 
     // Emit to channel-specific subscribers
     if (channel) {
       for (const listener of Array.from(this.channels[channel])) {
-        await listener(event, signal);
+        try {
+          await listener(event, signal);
+        } catch (e) {
+          if (errorMode === "throw") {
+            throw e;
+          }
+          console.warn(
+            `[agent] listener error: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
       }
     }
 
     // Emit to legacy subscribers (all events)
     for (const listener of Array.from(this.legacyListeners)) {
-      await listener(event, signal);
+      try {
+        await listener(event, signal);
+      } catch (e) {
+        if (errorMode === "throw") {
+          throw e;
+        }
+        console.warn(
+          `[agent] listener error: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
     }
   }
 }
@@ -223,7 +165,7 @@ This design:
 - `eventBus.on(channel, listener)` → channel-specific, only receives that channel's events
 - `eventBus.once(channel, listener)` → same, but auto-removes after first call
 - `eventBus.subscribeLegacy(listener)` → all events (backward compat)
-- `eventBus.emit(event, signal)` → routes to channel + legacy
+- `eventBus.emit(event, signal, errorMode)` → routes to channel + legacy with configurable error handling
 
 ### Agent class changes (packages/agent/src/agent.ts)
 
@@ -267,166 +209,14 @@ Replace the listener iteration at the bottom of `processEvents`:
 // }
 
 // NEW:
-await this.eventBus.emit(event, signal);
-```
-
-Wait — but we need to preserve the error handling behavior. Currently `processEvents` swallows listener errors during `agent_end` but throws otherwise. If `EventBus.emit` just awaits listeners, the error handling must either be in `emit` or in `processEvents`.
-
-Better: keep the current error handling pattern but wrap the `emit` call:
-
-```typescript
-// In processEvents, after the switch statement:
 if (!this.activeRun) {
   throw new Error("Agent listener invoked outside active run");
 }
 
-try {
-  await this.eventBus.emit(event, signal);
-} catch (e) {
-  // Swallow listener errors during agent_end
-  if (event.type !== "agent_end") {
-    throw e;
-  }
-  console.warn(
-    `[agent] listener error during agent_end: ${e instanceof Error ? e.message : String(e)}`,
-  );
-}
+// Preserve existing error handling: agent_end swallows errors, other events throw
+const errorMode = event.type === "agent_end" ? "log-and-continue" : "throw";
+await this.eventBus.emit(event, signal, errorMode);
 ```
-
-Actually, rethinking: The current error-swallow behavior is specific to `agent_end`. If `EventBus.emit` throws a listener error, we need to catch it at the Agent level during `agent_end` but rethrow it otherwise. Moving the catch from `processEvents` into `EventBus.emit` would change behavior (the error would never propagate). So the catch stays in `processEvents`.
-
-But `EventBus.emit` just awaits listeners. If a listener throws, `emit` throws. Then `processEvents` catches it during `agent_end` and rethrows otherwise. This preserves existing behavior.
-
-However, there's one issue: currently the error is caught per-listener in `processEvents` (the inner try/catch is inside the loop). If we move to `EventBus.emit`, we need to decide: does `emit` catch per-listener or let the first thrown error abort?
-
-The current code:
-
-```typescript
-for (const listener of this.listeners) {
-  try {
-    await listener(event, signal);
-  } catch (e) {
-    if (event.type !== "agent_end") throw e;
-    console.warn(...);
-  }
-}
-```
-
-So each listener's error is caught individually during `agent_end`. Other listeners still run. With `EventBus.emit`, if we let the first error abort, we lose this behavior.
-
-**Solution**: `EventBus.emit` should catch per-listener and aggregate errors (or just log and continue during `agent_end`). But `EventBus.emit` doesn't know about `agent_end`.
-
-Simpler approach: keep the error handling pattern in the emitter but pass an error handler:
-
-```typescript
-// EventBus.emit signature changes:
-async emit(
-  event: AgentEvent,
-  signal: AbortSignal,
-  options?: { onError?: (error: unknown, listener: ChannelListener) => void },
-): Promise<void> { ... }
-```
-
-No, that's overcomplicating. The simplest correct design: `EventBus.emit` should NOT catch errors. The caller (`processEvents`) wraps the whole emit with a try/catch. During `agent_end`, the catch logs and swallows. For other events, the catch rethrows (which is the default if you don't catch). But then a listener error during non-agent_end would abort emission and not run subsequent listeners. That actually matches the CURRENT behavior for non-agent_end events — wait, let me re-read:
-
-```typescript
-for (const listener of this.listeners) {
-  try {
-    await listener(event, signal);
-  } catch (e) {
-    if (event.type !== "agent_end") { throw e; }
-    console.warn(...);
-  }
-}
-```
-
-For non-agent_end events, if a listener throws, `throw e` exits the for loop and aborts the emission. Subsequent listeners do NOT run. For agent_end, the error is logged and the for loop continues to the next listener.
-
-So with `EventBus.emit`, we need:
-
-- Non-agent_end: first thrown error aborts, no further listeners
-- agent_end: per-listener catch, continue to next listener
-
-To preserve this exactly, we'd need `emit` to take an option about error handling or the caller to implement the pattern.
-
-Simpler: `EventBus.emit` iterates listeners and throws on first error. The `agent_end` special case is handled by `processEvents` calling emit differently.
-
-Actually, the simplest and cleanest approach:
-
-```typescript
-// EventBus.emit: standard behavior - throws on first error
-async emit(event: AgentEvent, signal: AbortSignal): Promise<void> {
-  const channel = EventBus.getChannel(event);
-  if (channel) {
-    for (const listener of Array.from(this.channels[channel])) {
-      await listener(event, signal);
-    }
-  }
-  for (const listener of Array.from(this.legacyListeners)) {
-    await listener(event, signal);
-  }
-}
-
-// In Agent.processEvents, use a wrapper:
-private async emitEvent(event: AgentEvent, signal: AbortSignal): Promise<void> {
-  if (event.type === "agent_end") {
-    try {
-      await this.eventBus.emit(event, signal);
-    } catch (e) {
-      console.warn(`[agent] listener error during agent_end: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  } else {
-    await this.eventBus.emit(event, signal);
-  }
-}
-```
-
-Wait, this changes behavior for `agent_end`. Currently, errors in individual listeners are caught and the loop continues. With the wrapper above, if `emit` throws on the FIRST listener error during `agent_end`, that listener's error aborts all remaining listeners. That's a breaking change.
-
-**The fix**: `EventBus.emit` should handle the agent_end case internally. It should know about allowing errors to be swallowed? No, EventBus shouldn't know about agent semantics.
-
-**Better fix**: Make `EventBus.emit` take an error mode:
-
-```typescript
-async emit(
-  event: AgentEvent,
-  signal: AbortSignal,
-  errorMode: "throw" | "log-and-continue" = "throw",
-): Promise<void> {
-  // channel listeners
-  if (channel) {
-    for (const listener of Array.from(this.channels[channel])) {
-      try {
-        await listener(event, signal);
-      } catch (e) {
-        if (errorMode === "throw") throw e;
-        // log
-      }
-    }
-  }
-  // legacy listeners
-  for (const listener of Array.from(this.legacyListeners)) {
-    try {
-      await listener(event, signal);
-    } catch (e) {
-      if (errorMode === "throw") throw e;
-      // log
-    }
-  }
-}
-```
-
-Then in `processEvents`:
-
-```typescript
-if (event.type === "agent_end") {
-  await this.eventBus.emit(event, signal, "log-and-continue");
-} else {
-  await this.eventBus.emit(event, signal, "throw");
-}
-```
-
-This preserves exact behavior.
 
 ### Export changes (packages/agent/src/index.ts)
 
@@ -434,6 +224,7 @@ This preserves exact behavior.
 export type {
   // ... existing ...
   Channel,
+  ChannelListener,
 } from "./types.js";
 
 export { EventBus } from "./event-bus.js";
@@ -469,7 +260,7 @@ User: agent.subscribe(legacyHandler)
 User: agent.prompt("Hello")
   → loop runs
   → any event
-    → eventBus.emit adds event to channel-specific set
+    → eventBus.emit routes to channel-specific listeners
     → legacyHandler is ALSO called via legacyListeners
 ```
 
@@ -479,7 +270,7 @@ User: agent.prompt("Hello")
 
 **Problem**: The existing per-listener error handling for `agent_end` must be preserved.
 
-**Mitigation**: Add `errorMode` to `EventBus.emit` as described above. `agent_end` uses `"log-and-continue"`, all other events use `"throw"`. This matches the current behavior exactly.
+**Mitigation**: Use `errorMode` parameter on `EventBus.emit`. During `agent_end`, use `"log-and-continue"` mode which catches per-listener errors and logs them without aborting. For all other events, use `"throw"` mode which aborts on first error. This matches the current behavior exactly.
 
 ### Risk 2: Memory leak from un-removed listeners
 
@@ -497,7 +288,7 @@ User: agent.prompt("Hello")
 
 **Problem**: A listener on `"streaming"` channel still receives the full `AgentEvent` type, so it must narrow by `event.type` inside the handler.
 
-**Mitigation**: This matches current patterns. The `ChannelEvent` type provides inference if we change the signature, but for backward compat with existing handler patterns, keeping `AgentEvent` as the parameter type is simpler.
+**Mitigation**: This matches current patterns. Consumers can use type guards to narrow as needed.
 
 ## Testing and validation
 
