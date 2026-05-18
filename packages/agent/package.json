@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "@bookingcare/ai": "^0.3.0",
-    "@bookingcare/infra": "workspace:*",
+    "@bookingcare/infra": "^0.3.0",
     "@sinclair/typebox": "^0.34.49"
   }
 }

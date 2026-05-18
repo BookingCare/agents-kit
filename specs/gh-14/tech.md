@@ -42,7 +42,7 @@ A buggy or malicious tool can block the event loop, escape the workspace through
 
 Move sandboxing into a separate workspace package, `packages/infra`. Publish it as `@bookingcare/infra`.
 
-This package is additive; it does not replace or rename `packages/db`.
+`packages/infra` now also owns persistence; the former `packages/db` package is intentionally merged into it.
 
 The package is the construction boundary for sandbox implementations. It currently supports one kind: `local`.
 

@@ -27,7 +27,7 @@ importers:
         specifier: ^0.3.0
         version: 0.3.0
       '@bookingcare/infra':
-        specifier: workspace:*
+        specifier: ^0.3.0
         version: link:../infra
       '@sinclair/typebox':
         specifier: ^0.34.49
@@ -74,7 +74,7 @@ importers:
   packages/infra:
     dependencies:
       '@bookingcare/ai':
-        specifier: workspace:*
+        specifier: ^0.3.0
         version: link:../ai
     devDependencies:
       '@bookingcare/tsconfig':
