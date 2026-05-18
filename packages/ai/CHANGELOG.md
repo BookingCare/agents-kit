@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-18
+
+### Changed
+- Updated dependencies to use `@bookingcare/infra`.
+
 ## [0.3.0] - 2026-05-17
 
 ### Breaking Changes
