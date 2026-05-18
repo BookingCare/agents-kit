@@ -1,8 +1,11 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "composite": true,
+    "paths": {},
     "outDir": "dist",
     "rootDir": "src"
   },
+  "references": [{ "path": "../ai/tsconfig.build.json" }],
   "include": ["src"]
 }

@@ -21,32 +21,36 @@ function channelForEvent(event: AgentEvent): Channel {
   }
 }
 
+type AnyChannelListener = ChannelListener<Channel>;
+
 export class EventBus {
-  private readonly channels: Record<Channel, Set<ChannelListener>> = {
+  private readonly channels: Record<Channel, Set<AnyChannelListener>> = {
     lifecycle: new Set(),
     streaming: new Set(),
     tools: new Set(),
   };
 
-  on(channel: Channel, listener: ChannelListener): () => void {
-    this.channels[channel].add(listener);
+  on<C extends Channel>(channel: C, listener: ChannelListener<C>): () => void {
+    const channelListeners = this.channels[channel];
+    channelListeners.add(listener as AnyChannelListener);
     return () => {
-      this.channels[channel].delete(listener);
+      channelListeners.delete(listener as AnyChannelListener);
     };
   }
 
-  once(channel: Channel, listener: ChannelListener): () => void {
-    const wrapped: ChannelListener = async (event, signal) => {
+  once<C extends Channel>(channel: C, listener: ChannelListener<C>): () => void {
+    const channelListeners = this.channels[channel];
+    const wrapped: ChannelListener<C> = async (event, signal) => {
       try {
         await listener(event, signal);
       } finally {
-        this.channels[channel].delete(wrapped);
+        channelListeners.delete(wrapped as AnyChannelListener);
       }
     };
 
-    this.channels[channel].add(wrapped);
+    channelListeners.add(wrapped as AnyChannelListener);
     return () => {
-      this.channels[channel].delete(wrapped);
+      channelListeners.delete(wrapped as AnyChannelListener);
     };
   }
 

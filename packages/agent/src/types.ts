@@ -256,7 +256,25 @@ export type AgentEvent =
 
 export type Channel = "lifecycle" | "streaming" | "tools";
 
-export type ChannelListener = (event: AgentEvent, signal: AbortSignal) => Promise<void> | void;
+export type ChannelEventMap = {
+  lifecycle: ContextTrimmedEvent | Extract<AgentEvent, { type: "agent_end" }>;
+  streaming:
+    | Extract<AgentEvent, { type: "message_start" }>
+    | Extract<AgentEvent, { type: "message_update" }>
+    | Extract<AgentEvent, { type: "message_end" }>;
+  tools:
+    | PermissionNeededEvent
+    | Extract<AgentEvent, { type: "tool_execution_start" }>
+    | Extract<AgentEvent, { type: "tool_execution_end" }>
+    | Extract<AgentEvent, { type: "turn_end" }>;
+};
+
+export type ChannelEvent<C extends Channel> = ChannelEventMap[C];
+
+export type ChannelListener<C extends Channel = Channel> = (
+  event: ChannelEvent<C>,
+  signal: AbortSignal,
+) => Promise<void> | void;
 
 export interface AgentContext {
   systemPrompt: string;

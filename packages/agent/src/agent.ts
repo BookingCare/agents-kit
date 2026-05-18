@@ -35,6 +35,7 @@ import type {
   BreakpointStage,
   QueueMode,
   StreamFn,
+  ChannelListener,
   StreamingAssistantMessage,
   ToolExecutionMode,
 } from "./types.js";
@@ -360,9 +361,11 @@ export class Agent {
   subscribe(
     listener: (event: AgentEvent, signal: AbortSignal) => Promise<void> | void,
   ): () => void {
-    const lifecycleListener = (event: AgentEvent, signal: AbortSignal) => listener(event, signal);
-    const streamingListener = (event: AgentEvent, signal: AbortSignal) => listener(event, signal);
-    const toolsListener = (event: AgentEvent, signal: AbortSignal) => listener(event, signal);
+    const lifecycleListener: ChannelListener<"lifecycle"> = (event, signal) =>
+      listener(event, signal);
+    const streamingListener: ChannelListener<"streaming"> = (event, signal) =>
+      listener(event, signal);
+    const toolsListener: ChannelListener<"tools"> = (event, signal) => listener(event, signal);
 
     const unsubscribeLifecycle = this.eventBus.on("lifecycle", lifecycleListener);
     const unsubscribeStreaming = this.eventBus.on("streaming", streamingListener);

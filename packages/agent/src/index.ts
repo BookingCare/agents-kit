@@ -26,6 +26,8 @@ export type {
   AgentEvent,
   AgentContext,
   Channel,
+  ChannelEventMap,
+  ChannelEvent,
   ChannelListener,
   BreakpointStage,
   BreakpointCondition,

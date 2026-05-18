@@ -147,6 +147,22 @@ describe("EventBus", () => {
     expect(calls).toEqual(["second"]);
   });
 
+  it("narrows listener event types by channel", () => {
+    const bus = new EventBus();
+
+    bus.on("streaming", (event) => {
+      // @ts-expect-error streaming listeners do not receive tool execution fields
+      event.toolCallId;
+    });
+
+    bus.on("tools", (event) => {
+      // @ts-expect-error tool listeners do not receive streaming fields
+      event.message;
+    });
+
+    void bus;
+  });
+
   it("once listeners fire once and remove themselves after completion", async () => {
     const bus = new EventBus();
     const signal = new AbortController().signal;
