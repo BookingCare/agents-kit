@@ -1,5 +1,5 @@
 {
-  "name": "@bookingcare/infa",
+  "name": "@bookingcare/infra",
   "version": "0.3.0",
   "description": "Sandbox execution and persistence for process-isolated agent tools with resource limits",
   "license": "MIT",

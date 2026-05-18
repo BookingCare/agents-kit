@@ -16,7 +16,7 @@ afterEach(() => {
 
 describe("createSandbox", () => {
   it("creates a local sandbox and workdir", () => {
-    workdir = join(tmpdir(), `infa-factory-${Date.now()}`);
+    workdir = join(tmpdir(), `infra-factory-${Date.now()}`);
     const sandbox = createSandbox({ kind: "local", workdir });
 
     expect(existsSync(workdir)).toBe(true);
@@ -27,7 +27,7 @@ describe("createSandbox", () => {
   });
 
   it("fails fast for unsupported kinds", () => {
-    workdir = join(tmpdir(), `infa-factory-${Date.now()}`);
+    workdir = join(tmpdir(), `infra-factory-${Date.now()}`);
     expect(() => createSandbox({ kind: "bogus" as never, workdir } as SandboxOptions)).toThrow(
       "Unsupported sandbox kind: bogus",
     );

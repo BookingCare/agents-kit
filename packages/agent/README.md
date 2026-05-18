@@ -63,10 +63,10 @@ File paths are sandboxed to `workdir` — path traversal attempts throw.
 
 ### Sandbox integration
 
-Pass a sandbox from `@bookingcare/infa` to route bash and file tools through process-isolated execution. Local sandboxes do not inherit the parent environment, so include a safe `PATH` (and on Windows, `SystemRoot`/`ComSpec` when needed) if commands need external binaries:
+Pass a sandbox from `@bookingcare/infra` to route bash and file tools through process-isolated execution. Local sandboxes do not inherit the parent environment, so include a safe `PATH` (and on Windows, `SystemRoot`/`ComSpec` when needed) if commands need external binaries:
 
 ```typescript
-import { createSandbox } from "@bookingcare/infa";
+import { createSandbox } from "@bookingcare/infra";
 
 const sandbox = createSandbox({
   kind: "local",
@@ -317,11 +317,11 @@ const readFileTool: AgentTool<typeof ReadFileParams> = {
 
 ## Persistence
 
-`Agent` can persist its session state to an external `Store` (e.g. `JSONStore` from `@bookingcare/infa`). When a `store` is provided, the agent automatically saves the full transcript, todo state, and metadata to the store on every `agent_end` event.
+`Agent` can persist its session state to an external `Store` (e.g. `JSONStore` from `@bookingcare/infra`). When a `store` is provided, the agent automatically saves the full transcript, todo state, and metadata to the store on every `agent_end` event.
 
 ```typescript
 import { Agent } from "@bookingcare/agent";
-import { JSONStore } from "@bookingcare/infa";
+import { JSONStore } from "@bookingcare/infra";
 
 const store = await JSONStore.create({ baseDir: "./data" });
 

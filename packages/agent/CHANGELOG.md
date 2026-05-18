@@ -12,12 +12,12 @@
 ### Added
 
 - `PermissionManager` — rule-based tool approval with allow / deny / ask decisions, scoped path/command matching, and `permission_needed` events on `Agent`
-- Optional `store` parameter on `Agent` — accepts a `@bookingcare/infa` `Store` for automatic session persistence
+- Optional `store` parameter on `Agent` — accepts a `@bookingcare/infra` `Store` for automatic session persistence
 - Optional `todoManager` parameter on `Agent` — todo state is persisted to the store alongside messages
 - `Agent.resume()` static method — reconstructs an agent from a previously persisted session (loads messages, metadata, and todo state)
 - `sessionId` is auto-generated when `store` is provided and no `sessionId` is given
 - State is persisted automatically on each `agent_end` event when a `store` is configured
-- Optional `sandbox` parameter on `createToolDispatch()` — bash, read_file, write_file, and edit_file route through `@bookingcare/infa` when provided
+- Optional `sandbox` parameter on `createToolDispatch()` — bash, read_file, write_file, and edit_file route through `@bookingcare/infra` when provided
 - Tool dispatch handlers are async-aware so sandbox-backed commands can be awaited in the agent loop
 - Sandboxed `read_file` preserves the existing 50 KB default cap when no explicit line limit is provided
 

@@ -6,7 +6,7 @@ import { resolve, dirname, relative, isAbsolute } from "node:path";
 import { SkillLoader } from "./skill-loader.js";
 import { TodoManager } from "./todo-manager.js";
 import type { TodoItem } from "./todo-manager.js";
-import type { Sandbox, SandboxResult } from "@bookingcare/infa";
+import type { Sandbox, SandboxResult } from "@bookingcare/infra";
 import type { ToolHandler, ToolDispatch } from "./types.js";
 
 export type { ToolHandler, ToolDispatch } from "./types.js";

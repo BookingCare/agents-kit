@@ -38,9 +38,9 @@ A buggy or malicious tool can block the event loop, escape the workspace through
 
 ## Proposed changes
 
-### 1. New package: `packages/infa`
+### 1. New package: `packages/infra`
 
-Move sandboxing into a separate workspace package, `packages/infa`. Publish it as `@bookingcare/infa`.
+Move sandboxing into a separate workspace package, `packages/infra`. Publish it as `@bookingcare/infra`.
 
 This package is additive; it does not replace or rename `packages/db`.
 
@@ -49,7 +49,7 @@ The package is the construction boundary for sandbox implementations. It current
 Suggested layout:
 
 ```text
-packages/infa/
+packages/infra/
   src/
     index.ts
     types.ts
@@ -64,7 +64,7 @@ packages/infa/
 
 ### 2. Factory-based public API
 
-`packages/infa` exports a factory, not a public concrete constructor.
+`packages/infra` exports a factory, not a public concrete constructor.
 
 ```typescript
 export type SandboxKind = "local";
@@ -163,7 +163,7 @@ Tool dispatch handlers become async-aware so the agent loop can await sandbox re
 
 ## Testing and validation
 
-### Unit tests (`packages/infa/test/`)
+### Unit tests (`packages/infra/test/`)
 
 - `createSandbox({ kind: "local" })` returns a working sandbox
 - unsupported kinds fail fast

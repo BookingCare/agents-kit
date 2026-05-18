@@ -27,7 +27,7 @@ afterEach(() => {
 
 describe("LocalSandbox", () => {
   it("exec returns stdout for a simple command", async () => {
-    const workdir = createTempDir("infa-exec-");
+    const workdir = createTempDir("infra-exec-");
     const sandbox = createSandbox({ kind: "local", workdir });
 
     const result = await sandbox.exec(`"${process.execPath}" -e "process.stdout.write('hello')"`);
@@ -40,7 +40,7 @@ describe("LocalSandbox", () => {
   });
 
   it("rejects maxMemory values smaller than 1 KiB", () => {
-    const workdir = createTempDir("infa-memory-");
+    const workdir = createTempDir("infra-memory-");
 
     expect(() => createSandbox({ kind: "local", workdir, maxMemory: 512 })).toThrow(
       "Invalid maxMemory: 512. Must be at least 1024 bytes.",
@@ -48,7 +48,7 @@ describe("LocalSandbox", () => {
   });
 
   it("exec kills a long-running command on timeout", async () => {
-    const workdir = createTempDir("infa-timeout-");
+    const workdir = createTempDir("infra-timeout-");
     const sandbox = createSandbox({ kind: "local", workdir });
 
     const result = await sandbox.exec(`"${process.execPath}" -e "while(true){}"`, {
@@ -64,7 +64,7 @@ describe("LocalSandbox", () => {
       return;
     }
 
-    const workdir = createTempDir("infa-tree-timeout-");
+    const workdir = createTempDir("infra-tree-timeout-");
     const sandbox = createSandbox({ kind: "local", workdir });
     const marker = join(workdir, "timeout-child.txt");
 
@@ -80,7 +80,7 @@ describe("LocalSandbox", () => {
   });
 
   it("exec kills a command that exceeds maxOutput", async () => {
-    const workdir = createTempDir("infa-output-");
+    const workdir = createTempDir("infra-output-");
     const sandbox = createSandbox({ kind: "local", workdir });
 
     const result = await sandbox.exec(
@@ -98,7 +98,7 @@ describe("LocalSandbox", () => {
       return;
     }
 
-    const workdir = createTempDir("infa-tree-output-");
+    const workdir = createTempDir("infra-tree-output-");
     const sandbox = createSandbox({ kind: "local", workdir });
     const marker = join(workdir, "output-child.txt");
 
@@ -114,7 +114,7 @@ describe("LocalSandbox", () => {
   });
 
   it("readFile returns file contents and respects line limits", async () => {
-    const workdir = createTempDir("infa-read-");
+    const workdir = createTempDir("infra-read-");
     const sandbox = createSandbox({ kind: "local", workdir });
     const filePath = join(workdir, "notes.txt");
 
@@ -125,7 +125,7 @@ describe("LocalSandbox", () => {
   });
 
   it("writeFile creates missing parent directories", async () => {
-    const workdir = createTempDir("infa-write-");
+    const workdir = createTempDir("infra-write-");
     const sandbox = createSandbox({ kind: "local", workdir });
 
     await sandbox.writeFile("nested/dir/file.txt", "hello");
@@ -135,7 +135,7 @@ describe("LocalSandbox", () => {
   });
 
   it("rejects absolute paths", async () => {
-    const workdir = createTempDir("infa-abs-");
+    const workdir = createTempDir("infra-abs-");
     const sandbox = createSandbox({ kind: "local", workdir });
 
     await expect(sandbox.readFile(join(workdir, "escape.txt"))).rejects.toThrow(
@@ -145,7 +145,7 @@ describe("LocalSandbox", () => {
   });
 
   it("rejects relative path escapes", async () => {
-    const workdir = createTempDir("infa-relative-");
+    const workdir = createTempDir("infra-relative-");
     const sandbox = createSandbox({ kind: "local", workdir });
 
     await expect(sandbox.readFile("../escape.txt")).rejects.toThrow("Path escapes workspace");
@@ -156,8 +156,8 @@ describe("LocalSandbox", () => {
       return;
     }
 
-    const workdir = createTempDir("infa-symlink-");
-    const outside = createTempDir("infa-outside-");
+    const workdir = createTempDir("infra-symlink-");
+    const outside = createTempDir("infra-outside-");
     const sandbox = createSandbox({ kind: "local", workdir });
 
     symlinkSync(outside, join(workdir, "link"));
@@ -166,7 +166,7 @@ describe("LocalSandbox", () => {
   });
 
   it("passes explicit env vars to spawned processes and does not inherit parent env", async () => {
-    const workdir = createTempDir("infa-env-");
+    const workdir = createTempDir("infra-env-");
     const sandbox = createSandbox({ kind: "local", workdir, env: { CUSTOM_VAR: "sandboxed" } });
 
     const previousSecret = process.env.SUPER_SECRET;

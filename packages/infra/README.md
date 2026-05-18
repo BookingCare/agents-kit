@@ -1,17 +1,17 @@
-# @bookingcare/infa
+# @bookingcare/infra
 
 Sandbox execution for process-isolated agent tools with resource limits.
 
 ## Installation
 
 ```bash
-pnpm add @bookingcare/infa
+pnpm add @bookingcare/infra
 ```
 
 ## Usage
 
 ```typescript
-import { createSandbox } from "@bookingcare/infa";
+import { createSandbox } from "@bookingcare/infra";
 
 const sandbox = createSandbox({
   kind: "local",
@@ -32,4 +32,4 @@ Sandboxed processes do not inherit the parent environment. Pass a safe `PATH` (a
 
 ## Persistence
 
-`@bookingcare/infa` exports persistence helpers from the root package and the `./persistence` subpath.
+`@bookingcare/infra` exports persistence helpers from the root package and the `./persistence` subpath.
