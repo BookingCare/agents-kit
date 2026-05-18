@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-18
+
 ### Added
 
 - Typed `EventBus` with lifecycle, streaming, and tools channels plus `on()`/`once()` subscriptions; `Agent.subscribe()` now delegates to all channels and is deprecated.
