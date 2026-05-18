@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { serializeAgentState, createTodoSnapshot } from "../src/utils/serialize.js";
+import { serializeAgentState, createTodoSnapshot } from "../src/persistence/utils/serialize.js";
 import type { Model, Message } from "@bookingcare/ai";
 
 type AgentStateLike = {

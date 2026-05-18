@@ -1,7 +1,7 @@
 {
-  "name": "@bookingcare/db",
+  "name": "@bookingcare/infra",
   "version": "0.3.0",
-  "description": "Persistence layer for agent sessions with pluggable storage backends",
+  "description": "Sandbox execution and persistence for process-isolated agent tools with resource limits",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,9 +11,9 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./json-store": {
-      "types": "./dist/providers/json-store.d.ts",
-      "default": "./dist/providers/json-store.js"
+    "./persistence": {
+      "types": "./dist/persistence/index.d.ts",
+      "default": "./dist/persistence/index.js"
     }
   },
   "files": [

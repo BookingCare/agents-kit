@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createSandbox } from "@bookingcare/infa";
+import { createSandbox } from "@bookingcare/infra";
 import { createToolDispatch, type ToolDispatch } from "../src/tools.js";
 import { runAgentLoop } from "../src/agent-loop.js";
 import type { AgentMessage, AgentTool, AgentLoopConfig } from "../src/types.js";

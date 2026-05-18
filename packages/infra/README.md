@@ -1,17 +1,17 @@
-# @bookingcare/infa
+# @bookingcare/infra
 
 Sandbox execution for process-isolated agent tools with resource limits.
 
 ## Installation
 
 ```bash
-pnpm add @bookingcare/infa
+pnpm add @bookingcare/infra
 ```
 
 ## Usage
 
 ```typescript
-import { createSandbox } from "@bookingcare/infa";
+import { createSandbox } from "@bookingcare/infra";
 
 const sandbox = createSandbox({
   kind: "local",
@@ -29,3 +29,7 @@ const result = await sandbox.exec("echo hello");
 Sandboxed processes do not inherit the parent environment. Pass a safe `PATH` (and on Windows, `SystemRoot`/`ComSpec`) in `env` when commands need external binaries.
 
 `Sandbox` also exposes `readFile()`, `writeFile()`, and `editFile()` for workspace-scoped file operations.
+
+## Persistence
+
+`@bookingcare/infra` exports persistence helpers from the root package and the `./persistence` subpath.

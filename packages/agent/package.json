@@ -29,8 +29,7 @@
   },
   "dependencies": {
     "@bookingcare/ai": "^0.3.0",
-    "@bookingcare/db": "^0.3.0",
-    "@bookingcare/infa": "^0.3.0",
+    "@bookingcare/infra": "^0.3.0",
     "@sinclair/typebox": "^0.34.49"
   }
 }

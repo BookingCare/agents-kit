@@ -12,8 +12,8 @@ import {
   type Transport,
   type Usage,
 } from "@bookingcare/ai";
-import type { Store, AgentInfo } from "@bookingcare/db";
-import { NotFoundError, serializeAgentState, createTodoSnapshot } from "@bookingcare/db";
+import type { Store, AgentInfo } from "@bookingcare/infra";
+import { NotFoundError, serializeAgentState, createTodoSnapshot } from "@bookingcare/infra";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.js";
 import { BreakpointManager } from "./breakpoint-manager.js";
 import type { TodoManager } from "./todo-manager.js";

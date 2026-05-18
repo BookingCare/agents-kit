@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { JSONStore } from "../src/providers/json-store.js";
-import { CorruptDataError, StoreError } from "../src/errors.js";
-import type { StoredMessage, TodoSnapshot, AgentInfo } from "../src/types.js";
+import { JSONStore } from "../src/persistence/providers/json-store.js";
+import { CorruptDataError, StoreError } from "../src/persistence/errors.js";
+import type { StoredMessage, TodoSnapshot, AgentInfo } from "../src/persistence/types.js";
 
 async function createTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "db-test-"));

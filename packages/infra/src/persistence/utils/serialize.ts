@@ -5,8 +5,8 @@ import type { TodoItem, TodoSnapshot, AgentInfo } from "../types.js";
  * Local interface describing only the fields that serializeAgentState needs.
  *
  * We intentionally avoid importing `AgentState` from `@bookingcare/agent`
- * because `@bookingcare/db` is consumed by `@bookingcare/agent`. Importing
- * the real type would create a circular dependency between the two packages.
+ * because persistence is consumed by `@bookingcare/agent`. Importing the real
+ * type would create a circular dependency between the two packages.
  */
 interface AgentStateLike {
   messages: Message[];

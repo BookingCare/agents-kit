@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Replaced the separate `@bookingcare/db` and `@bookingcare/infa` infrastructure packages with `@bookingcare/infra`.
+
 ## [0.3.0] - 2026-05-17
 
 ### Changed

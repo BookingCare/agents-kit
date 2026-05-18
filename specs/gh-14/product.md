@@ -2,7 +2,7 @@
 
 ## Summary
 
-Add a factory-created `Sandbox` in `packages/infa` that runs commands and file operations outside the agent process while keeping the default agent flow unchanged.
+Add a factory-created `Sandbox` in `packages/infra` that runs commands and file operations outside the agent process while keeping the default agent flow unchanged.
 
 ## Problem
 
@@ -49,7 +49,7 @@ const agent = new Agent({
 ### Using the Sandbox
 
 ```typescript
-import { createSandbox } from "@bookingcare/infa";
+import { createSandbox } from "@bookingcare/infra";
 import { Agent, createToolDispatch } from "@bookingcare/agent";
 
 const sandbox = createSandbox({
@@ -148,7 +148,7 @@ const sandbox = createSandbox({
 
 ## Validation
 
-### Unit tests (`packages/infa/test/`)
+### Unit tests (`packages/infra/test/`)
 
 - `createSandbox({ kind: "local" })` creates a sandbox
 - unsupported sandbox kinds fail fast

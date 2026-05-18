@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { auth, liveModel as getLiveModel } from "../helpers/live-model.js";
 import { Agent } from "../../src/agent.js";
-import { JSONStore, NotFoundError } from "@bookingcare/db";
+import { JSONStore, NotFoundError } from "@bookingcare/infra";
 import { TodoManager } from "../../src/todo-manager.js";
 
 async function createTempDir(): Promise<string> {
