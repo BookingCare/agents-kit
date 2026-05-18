@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-18
+
 ### Added
 
 - Persistence APIs moved into `@bookingcare/infra`, including `Store`, `JSONStore`, `serializeAgentState()`, `createTodoSnapshot()`, and storage errors.
