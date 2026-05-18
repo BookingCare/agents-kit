@@ -136,9 +136,7 @@ export class EventBus {
           if (errorMode === "throw") {
             throw e;
           }
-          console.warn(
-            `[agent] listener error: ${e instanceof Error ? e.message : String(e)}`,
-          );
+          console.warn(`[agent] listener error: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
     }
@@ -151,9 +149,7 @@ export class EventBus {
         if (errorMode === "throw") {
           throw e;
         }
-        console.warn(
-          `[agent] listener error: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        console.warn(`[agent] listener error: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
   }

@@ -6,7 +6,7 @@ Replace the single-listener firehose with a typed `EventBus` that organizes `Age
 
 ## Problem
 
-The current `Agent.subscribe(listener)` API delivers every event to every listener. A UI component that only cares about streaming text daemons, a telemetry exporter that only wants tool events, and a persistence handler that only wants `agent_end` all process every event type, leading to noisy filtering logic and wasted CPU.
+The current `Agent.subscribe(listener)` API delivers every event to every listener. A UI component that only cares about streaming text deltas/updates, a telemetry exporter that only wants tool events, and a persistence handler that only wants `agent_end` all process every event type, leading to noisy filtering logic and wasted CPU.
 
 ## Goals
 
