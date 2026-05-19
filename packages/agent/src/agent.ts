@@ -13,6 +13,8 @@ import {
   type Usage,
 } from "@bookingcare/ai";
 import type { Store, AgentInfo } from "@bookingcare/infra";
+import type { McpServerConfig } from "./mcp/client.js";
+import { McpRegistry } from "./mcp/registry.js";
 import { NotFoundError, serializeAgentState, createTodoSnapshot } from "@bookingcare/infra";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.js";
 import { EventBus } from "./event-bus.js";
@@ -147,6 +149,10 @@ export interface AgentOptions {
   todoManager?: TodoManager;
   /** Optional context manager for token budget management. */
   contextManager?: ContextManager;
+  /** Optional MCP server configurations to connect during initialization. */
+  mcpServers?: McpServerConfig[];
+  /** Optional pre-configured MCP registry. */
+  mcpRegistry?: McpRegistry;
   /** Optional breakpoint manager for pause/resume control. */
   breakpointManager?: BreakpointManager;
   /** Optional permission manager for tool approval flow. */
@@ -240,6 +246,8 @@ export class Agent {
   private store?: Store;
   private todoManager?: TodoManager;
   private createdAt?: number;
+  private mcpRegistry?: McpRegistry;
+  private mcpInitialization?: Promise<void>;
   /** Optional context manager for token budget management. */
   public contextManager?: ContextManager;
 
@@ -267,6 +275,27 @@ export class Agent {
     this.maxRetryDelayMs = options.maxRetryDelayMs;
     this.toolExecution = options.toolExecution ?? "parallel";
     this.contextManager = options.contextManager;
+    this.mcpRegistry = options.mcpRegistry;
+    this.mcpInitialization = this.mcpRegistry
+      ? Promise.resolve()
+      : this.initializeMcpServers(options.mcpServers ?? []);
+  }
+
+  private async initializeMcpServers(servers: McpServerConfig[]): Promise<void> {
+    if (servers.length === 0) return;
+
+    const registry = new McpRegistry();
+    this.mcpRegistry = registry;
+
+    try {
+      for (const server of servers) {
+        await registry.addServer(server);
+      }
+    } catch (error) {
+      await registry.shutdown();
+      this.mcpRegistry = undefined;
+      throw error;
+    }
   }
 
   /**
@@ -499,6 +528,7 @@ export class Agent {
       );
     }
     const messages = this.normalizePromptInput(input, images);
+    await this.ensureMcpInitialized();
     await this.runPromptMessages(messages);
   }
 
@@ -529,6 +559,7 @@ export class Agent {
       throw new Error("Cannot continue from message role: assistant");
     }
 
+    await this.ensureMcpInitialized();
     await this.runContinuation();
   }
 
@@ -549,6 +580,10 @@ export class Agent {
       content.push(...images);
     }
     return [{ role: "user", content, timestamp: Date.now() }];
+  }
+
+  private async ensureMcpInitialized(): Promise<void> {
+    await this.mcpInitialization;
   }
 
   private async runPromptMessages(
@@ -705,6 +740,12 @@ export class Agent {
       getFollowUpMessages: async () => this.followUpQueue.drain(),
       contextManager: this.contextManager,
     };
+  }
+
+  async shutdown(): Promise<void> {
+    await this.mcpInitialization;
+    await this.mcpRegistry?.shutdown();
+    this.mcpRegistry = undefined;
   }
 
   private async runWithLifecycle(executor: (signal: AbortSignal) => Promise<void>): Promise<void> {
