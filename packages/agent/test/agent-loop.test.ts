@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { agentLoop } from "../src/agent-loop.js";
+import { Type, tool } from "@bookingcare/ai";
 import { createToolDispatch } from "../src/tools.js";
+import type { McpRegistry } from "../src/mcp/registry.js";
 import { auth, liveModel as getLiveModel } from "./helpers/live-model.js";
 
 import type { StreamResult } from "@bookingcare/ai";
@@ -206,7 +208,7 @@ describe.skipIf(!auth)("tool dispatch e2e", () => {
   });
 
   it("rejects path traversal attacks", async () => {
-    const { dispatch } = createToolDispatch(workdir);
+    const { dispatch } = await createToolDispatch(workdir);
 
     expect(() => dispatch["read_file"]({ path: "../../etc/passwd" })).toThrow(
       "Path escapes workspace",
@@ -223,7 +225,7 @@ describe.skipIf(!auth)("skill loading e2e", () => {
   const skillsDir = resolve(import.meta.dirname, "fixtures/skills");
 
   it("injects skill descriptions into system prompt", async () => {
-    const { dispatch } = createToolDispatch(process.cwd(), skillsDir);
+    const { dispatch } = await createToolDispatch(process.cwd(), skillsDir);
 
     // The load_skill handler should be present
     expect(dispatch["load_skill"]).toBeDefined();
@@ -284,14 +286,14 @@ describe("tool dispatch", () => {
     rmSync(workdir, { recursive: true, force: true });
   });
 
-  it("bash throws on non-zero exit", () => {
-    const { dispatch } = createToolDispatch(workdir);
+  it("bash throws on non-zero exit", async () => {
+    const { dispatch } = await createToolDispatch(workdir);
     expect(() => dispatch["bash"]({ command: "exit 1" })).toThrow();
   });
 
-  it("edit_file throws when old_text not found", () => {
+  it("edit_file throws when old_text not found", async () => {
     writeFileSync(resolve(workdir, "test.txt"), "hello world");
-    const { dispatch } = createToolDispatch(workdir);
+    const { dispatch } = await createToolDispatch(workdir);
     expect(() =>
       dispatch["edit_file"]({
         path: "test.txt",
@@ -301,9 +303,9 @@ describe("tool dispatch", () => {
     ).toThrow("old_text not found");
   });
 
-  it("edit_file throws when old_text is not unique", () => {
+  it("edit_file throws when old_text is not unique", async () => {
     writeFileSync(resolve(workdir, "test.txt"), "abc def abc");
-    const { dispatch } = createToolDispatch(workdir);
+    const { dispatch } = await createToolDispatch(workdir);
     expect(() =>
       dispatch["edit_file"]({
         path: "test.txt",
@@ -313,10 +315,62 @@ describe("tool dispatch", () => {
     ).toThrow("not unique");
   });
 
-  it("read_file throws on negative limit", () => {
+  it("read_file throws on negative limit", async () => {
     writeFileSync(resolve(workdir, "test.txt"), "line1\nline2\nline3\n");
-    const { dispatch } = createToolDispatch(workdir);
+    const { dispatch } = await createToolDispatch(workdir);
     expect(() => dispatch["read_file"]({ path: "test.txt", limit: -1 })).toThrow("Invalid limit");
+  });
+
+  it("registers MCP tools and delegates calls", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const mcpRegistry = {
+      getAllTools: async () => [
+        tool({
+          name: "alpha:lookup",
+          description: "Lookup",
+          parameters: Type.Object({}),
+        }),
+      ],
+      callTool: async (name: string, args: Record<string, unknown>) => {
+        calls.push({ name, args });
+        return "mcp-result";
+      },
+    };
+
+    const { tools, dispatch } = await createToolDispatch(
+      workdir,
+      undefined,
+      undefined,
+      mcpRegistry as unknown as McpRegistry,
+    );
+
+    expect(tools.some((tool) => tool.name === "alpha:lookup")).toBe(true);
+    await expect(dispatch["alpha:lookup"]({ query: "hello" })).resolves.toBe("mcp-result");
+    expect(calls).toEqual([{ name: "alpha:lookup", args: { query: "hello" } }]);
+  });
+
+  it("propagates MCP tool failures to the agent loop", async () => {
+    const mcpRegistry = {
+      getAllTools: async () => [
+        tool({
+          name: "alpha:lookup",
+          description: "Lookup",
+          parameters: Type.Object({}),
+        }),
+      ],
+      callTool: async () => {
+        throw new Error("mcp failed");
+      },
+    };
+
+    const { dispatch } = await createToolDispatch(
+      workdir,
+      undefined,
+      undefined,
+      mcpRegistry as unknown as McpRegistry,
+    );
+
+    await expect(dispatch["alpha:lookup"]({ query: "hello" })).rejects.toThrow("mcp failed");
   });
 });
 

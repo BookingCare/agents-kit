@@ -13,6 +13,9 @@ import {
   type Usage,
 } from "@bookingcare/ai";
 import type { Store, AgentInfo } from "@bookingcare/infra";
+import type { McpServerConfig } from "./mcp/client.js";
+import { loadMcpConfig } from "./mcp/config.js";
+import { McpRegistry } from "./mcp/registry.js";
 import { NotFoundError, serializeAgentState, createTodoSnapshot } from "@bookingcare/infra";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.js";
 import { EventBus } from "./event-bus.js";
@@ -147,6 +150,14 @@ export interface AgentOptions {
   todoManager?: TodoManager;
   /** Optional context manager for token budget management. */
   contextManager?: ContextManager;
+  /** Load MCP server configurations from the local config file. */
+  loadMcpConfig?: boolean;
+  /** Directory to resolve MCP config files from. */
+  mcpConfigPath?: string;
+  /** Optional MCP server configurations to connect during initialization. */
+  mcpServers?: McpServerConfig[];
+  /** Optional pre-configured MCP registry. */
+  mcpRegistry?: McpRegistry;
   /** Optional breakpoint manager for pause/resume control. */
   breakpointManager?: BreakpointManager;
   /** Optional permission manager for tool approval flow. */
@@ -240,6 +251,10 @@ export class Agent {
   private store?: Store;
   private todoManager?: TodoManager;
   private createdAt?: number;
+  private mcpRegistry?: McpRegistry;
+  private mcpInitialization?: Promise<void>;
+  private mcpInitializationError?: unknown;
+  private mcpToolsLoaded = false;
   /** Optional context manager for token budget management. */
   public contextManager?: ContextManager;
 
@@ -267,6 +282,63 @@ export class Agent {
     this.maxRetryDelayMs = options.maxRetryDelayMs;
     this.toolExecution = options.toolExecution ?? "parallel";
     this.contextManager = options.contextManager;
+    this.mcpRegistry = options.mcpRegistry;
+    this.mcpInitialization = this.mcpRegistry
+      ? Promise.resolve()
+      : this.initializeMcpServers(options).catch((error) => {
+          this.mcpInitializationError = error;
+        });
+  }
+
+  private async initializeMcpServers(options: AgentOptions): Promise<void> {
+    const loadedConfig = options.loadMcpConfig
+      ? await loadMcpConfig(options.mcpConfigPath)
+      : { servers: [] };
+    const servers = [...loadedConfig.servers, ...(options.mcpServers ?? [])];
+    if (servers.length === 0) return;
+
+    const registry = new McpRegistry();
+    this.mcpRegistry = registry;
+
+    try {
+      for (const server of servers) {
+        await registry.addServer(server);
+      }
+
+      await this.syncMcpTools();
+    } catch (error) {
+      await registry.shutdown();
+      this.mcpRegistry = undefined;
+      this.mcpToolsLoaded = false;
+      throw error;
+    }
+  }
+
+  private async syncMcpTools(): Promise<void> {
+    const registry = this.mcpRegistry;
+    if (!registry || this.mcpToolsLoaded) {
+      return;
+    }
+
+    const existingToolNames = new Set(this._state.tools.map((tool) => tool.name));
+    const mcpTools = await registry.getAllTools();
+    const agentTools = mcpTools
+      .filter((tool) => !existingToolNames.has(tool.name))
+      .map(
+        (tool): AgentTool => ({
+          ...tool,
+          label: tool.name,
+          execute: async (_toolCallId: string, params: unknown) => ({
+            content: await registry.callTool(tool.name, params as Record<string, unknown>),
+          }),
+        }),
+      );
+
+    if (agentTools.length > 0) {
+      this._state.tools = [...this._state.tools, ...agentTools];
+    }
+
+    this.mcpToolsLoaded = true;
   }
 
   /**
@@ -499,6 +571,7 @@ export class Agent {
       );
     }
     const messages = this.normalizePromptInput(input, images);
+    await this.ensureMcpInitialized();
     await this.runPromptMessages(messages);
   }
 
@@ -529,6 +602,7 @@ export class Agent {
       throw new Error("Cannot continue from message role: assistant");
     }
 
+    await this.ensureMcpInitialized();
     await this.runContinuation();
   }
 
@@ -549,6 +623,23 @@ export class Agent {
       content.push(...images);
     }
     return [{ role: "user", content, timestamp: Date.now() }];
+  }
+
+  private async ensureMcpInitialized(): Promise<void> {
+    await this.mcpInitialization;
+
+    if (this.mcpInitializationError) {
+      throw this.mcpInitializationError;
+    }
+
+    if (!this.mcpToolsLoaded && this.mcpRegistry) {
+      try {
+        await this.syncMcpTools();
+      } catch (error) {
+        this.mcpInitializationError = error;
+        throw error;
+      }
+    }
   }
 
   private async runPromptMessages(
@@ -705,6 +796,20 @@ export class Agent {
       getFollowUpMessages: async () => this.followUpQueue.drain(),
       contextManager: this.contextManager,
     };
+  }
+
+  async shutdown(): Promise<void> {
+    await this.mcpInitialization;
+    try {
+      await this.mcpRegistry?.shutdown();
+    } finally {
+      this.mcpRegistry = undefined;
+      this.mcpToolsLoaded = false;
+    }
+
+    if (this.mcpInitializationError) {
+      throw this.mcpInitializationError;
+    }
   }
 
   private async runWithLifecycle(executor: (signal: AbortSignal) => Promise<void>): Promise<void> {

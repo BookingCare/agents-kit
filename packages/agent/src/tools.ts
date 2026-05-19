@@ -1,5 +1,6 @@
-import type { Tool } from "@bookingcare/ai";
 import { Type, tool } from "@bookingcare/ai";
+import type { Tool } from "@bookingcare/ai";
+import type { McpRegistry } from "./mcp/registry.js";
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname, relative, isAbsolute } from "node:path";
@@ -194,11 +195,12 @@ const baseTools = [bashTool, readFileTool, writeFileTool, editFileTool, todoTool
  * If a sandbox is provided, bash and file tools route through it.
  * Adding a tool = add a handler + add a schema entry. The loop never changes.
  */
-export function createToolDispatch(
+export async function createToolDispatch(
   workdir: string = process.cwd(),
   skillsDir?: string,
   sandbox?: Sandbox,
-): ToolDispatch {
+  mcpRegistry?: McpRegistry,
+): Promise<ToolDispatch> {
   const skillLoader = skillsDir ? new SkillLoader(skillsDir) : undefined;
 
   const todoManager = new TodoManager();
@@ -235,7 +237,16 @@ export function createToolDispatch(
         }),
       };
 
-  const tools = skillLoader ? [...baseTools, loadSkillTool] : [...baseTools];
+  const tools: Tool[] = skillLoader ? [...baseTools, loadSkillTool] : [...baseTools];
+
+  if (mcpRegistry) {
+    const mcpTools = await mcpRegistry.getAllTools();
+    tools.push(...mcpTools);
+
+    for (const mcpTool of mcpTools) {
+      dispatch[mcpTool.name] = async (args) => await mcpRegistry.callTool(mcpTool.name, args);
+    }
+  }
 
   return { tools, dispatch, skillLoader, todoManager };
 }
