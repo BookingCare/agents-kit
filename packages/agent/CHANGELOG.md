@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `McpServerConfig` now only supports `stdio` and `sse` transports; removed the unused `auth` and `websocket` fields.
+
 ### Added
 
 - MCP (Model Context Protocol) server support with SSE and stdio transports
@@ -24,7 +28,7 @@
 ### Internal
 
 - Added `packages/agent/src/mcp/` module with client, registry, schema-adapter, and config utilities
-- Added 20 tests covering MCP client, registry, schema adapter, config, and agent integration
+- Added 21 tests covering MCP client, registry, schema adapter, config, and agent integration
 
 ## [0.4.1] - 2026-05-18
 

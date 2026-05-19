@@ -253,6 +253,8 @@ export class Agent {
   private createdAt?: number;
   private mcpRegistry?: McpRegistry;
   private mcpInitialization?: Promise<void>;
+  private mcpInitializationError?: unknown;
+  private mcpToolsLoaded = false;
   /** Optional context manager for token budget management. */
   public contextManager?: ContextManager;
 
@@ -283,7 +285,9 @@ export class Agent {
     this.mcpRegistry = options.mcpRegistry;
     this.mcpInitialization = this.mcpRegistry
       ? Promise.resolve()
-      : this.initializeMcpServers(options);
+      : this.initializeMcpServers(options).catch((error) => {
+          this.mcpInitializationError = error;
+        });
   }
 
   private async initializeMcpServers(options: AgentOptions): Promise<void> {
@@ -300,11 +304,41 @@ export class Agent {
       for (const server of servers) {
         await registry.addServer(server);
       }
+
+      await this.syncMcpTools();
     } catch (error) {
       await registry.shutdown();
       this.mcpRegistry = undefined;
+      this.mcpToolsLoaded = false;
       throw error;
     }
+  }
+
+  private async syncMcpTools(): Promise<void> {
+    const registry = this.mcpRegistry;
+    if (!registry || this.mcpToolsLoaded) {
+      return;
+    }
+
+    const existingToolNames = new Set(this._state.tools.map((tool) => tool.name));
+    const mcpTools = await registry.getAllTools();
+    const agentTools = mcpTools
+      .filter((tool) => !existingToolNames.has(tool.name))
+      .map(
+        (tool): AgentTool => ({
+          ...tool,
+          label: tool.name,
+          execute: async (_toolCallId: string, params: unknown) => ({
+            content: await registry.callTool(tool.name, params as Record<string, unknown>),
+          }),
+        }),
+      );
+
+    if (agentTools.length > 0) {
+      this._state.tools = [...this._state.tools, ...agentTools];
+    }
+
+    this.mcpToolsLoaded = true;
   }
 
   /**
@@ -593,6 +627,19 @@ export class Agent {
 
   private async ensureMcpInitialized(): Promise<void> {
     await this.mcpInitialization;
+
+    if (this.mcpInitializationError) {
+      throw this.mcpInitializationError;
+    }
+
+    if (!this.mcpToolsLoaded && this.mcpRegistry) {
+      try {
+        await this.syncMcpTools();
+      } catch (error) {
+        this.mcpInitializationError = error;
+        throw error;
+      }
+    }
   }
 
   private async runPromptMessages(
@@ -753,8 +800,16 @@ export class Agent {
 
   async shutdown(): Promise<void> {
     await this.mcpInitialization;
-    await this.mcpRegistry?.shutdown();
-    this.mcpRegistry = undefined;
+    try {
+      await this.mcpRegistry?.shutdown();
+    } finally {
+      this.mcpRegistry = undefined;
+      this.mcpToolsLoaded = false;
+    }
+
+    if (this.mcpInitializationError) {
+      throw this.mcpInitializationError;
+    }
   }
 
   private async runWithLifecycle(executor: (signal: AbortSignal) => Promise<void>): Promise<void> {

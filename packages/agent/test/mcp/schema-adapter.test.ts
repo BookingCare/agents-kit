@@ -9,6 +9,68 @@ describe("convertJsonSchemaToTypeBox", () => {
     expect(convertJsonSchemaToTypeBox({ type: "boolean" })).toEqual(Type.Boolean());
   });
 
+  it("supports null and type unions", () => {
+    expect(convertJsonSchemaToTypeBox({ type: "null" })).toEqual(Type.Null());
+    expect(convertJsonSchemaToTypeBox({ type: ["string", "null"] })).toEqual(
+      Type.Union([Type.String(), Type.Null()]),
+    );
+  });
+
+  it("converts enum and const schemas", () => {
+    expect(convertJsonSchemaToTypeBox({ enum: ["red", "green"] })).toEqual(
+      Type.Union([Type.Const("red"), Type.Const("green")]),
+    );
+    expect(convertJsonSchemaToTypeBox({ const: "fixed" })).toEqual(Type.Const("fixed"));
+  });
+
+  it("converts oneOf, anyOf, and allOf schemas", () => {
+    expect(
+      convertJsonSchemaToTypeBox({
+        oneOf: [{ type: "string" }, { type: "number" }],
+      }),
+    ).toEqual(Type.Union([Type.String(), Type.Number()]));
+
+    expect(
+      convertJsonSchemaToTypeBox({
+        anyOf: [{ type: "boolean" }, { type: "null" }],
+      }),
+    ).toEqual(Type.Union([Type.Boolean(), Type.Null()]));
+
+    expect(
+      convertJsonSchemaToTypeBox({
+        allOf: [
+          {
+            type: "object",
+            properties: { id: { type: "string" } },
+            required: ["id"],
+          },
+          {
+            type: "object",
+            properties: { active: { type: "boolean" } },
+            required: ["active"],
+          },
+        ],
+      }),
+    ).toEqual(
+      Type.Intersect([Type.Object({ id: Type.String() }), Type.Object({ active: Type.Boolean() })]),
+    );
+  });
+
+  it("resolves local references", () => {
+    expect(
+      convertJsonSchemaToTypeBox({
+        $defs: {
+          tag: { type: "string" },
+        },
+        type: "object",
+        properties: {
+          tag: { $ref: "#/$defs/tag" },
+        },
+        required: ["tag"],
+      }),
+    ).toEqual(Type.Object({ tag: Type.String() }));
+  });
+
   it("converts required and optional object fields", () => {
     const schema = convertJsonSchemaToTypeBox({
       type: "object",
@@ -54,8 +116,8 @@ describe("convertJsonSchemaToTypeBox", () => {
   });
 
   it("throws on unsupported schema types", () => {
-    expect(() => convertJsonSchemaToTypeBox({ type: "null" })).toThrow(
-      "Unsupported JSON Schema type: null",
+    expect(() => convertJsonSchemaToTypeBox({ type: "function" })).toThrow(
+      "Unsupported JSON Schema type: function",
     );
   });
 });

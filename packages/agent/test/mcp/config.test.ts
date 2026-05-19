@@ -32,6 +32,29 @@ describe("loadMcpConfig", () => {
     }
   });
 
+  it("loads servers from an explicit config file path", async () => {
+    const dir = createTempDir("file");
+    try {
+      const configPath = resolve(dir, "custom-mcp.json");
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          servers: [
+            { name: "gamma", transport: "stdio", connection: { type: "stdio", command: "node" } },
+          ],
+        }),
+      );
+
+      await expect(loadMcpConfig(configPath)).resolves.toEqual({
+        servers: [
+          { name: "gamma", transport: "stdio", connection: { type: "stdio", command: "node" } },
+        ],
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("loads servers from .mcp/config.json", async () => {
     const dir = createTempDir("nested");
     try {
@@ -58,6 +81,16 @@ describe("loadMcpConfig", () => {
   it("returns an empty config when no file exists", async () => {
     const dir = createTempDir("empty");
     try {
+      await expect(loadMcpConfig(dir)).resolves.toEqual({ servers: [] });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("defaults missing servers to an empty array", async () => {
+    const dir = createTempDir("missing-servers");
+    try {
+      writeFileSync(resolve(dir, ".mcp.json"), JSON.stringify({}));
       await expect(loadMcpConfig(dir)).resolves.toEqual({ servers: [] });
     } finally {
       rmSync(dir, { recursive: true, force: true });

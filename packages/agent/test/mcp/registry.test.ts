@@ -61,6 +61,8 @@ describe("McpRegistry", () => {
 
     expect(alphaClient.connect).toHaveBeenCalledTimes(1);
     expect(betaClient.connect).toHaveBeenCalledTimes(1);
+    expect(alphaClient.listTools).toHaveBeenCalledTimes(1);
+    expect(betaClient.listTools).toHaveBeenCalledTimes(1);
   });
 
   it("delegates tool calls to the correct server", async () => {
@@ -74,6 +76,7 @@ describe("McpRegistry", () => {
     await registry.addServer(serverA);
 
     await expect(registry.callTool("alpha:lookup", { q: "x" })).resolves.toBe("alpha:lookup");
+    expect(alphaClient.listTools).toHaveBeenCalledTimes(1);
     expect(alphaClient.callTool).toHaveBeenCalledWith("lookup", { q: "x" });
   });
 
@@ -95,6 +98,18 @@ describe("McpRegistry", () => {
     );
   });
 
+  it("rejects server names that would break tool routing", async () => {
+    const registry = new McpRegistry();
+
+    await expect(
+      registry.addServer({
+        name: "bad:name",
+        transport: "sse",
+        connection: { type: "sse", url: "http://bad/sse" },
+      }),
+    ).rejects.toThrow('Invalid MCP server name: bad:name. ":" is reserved for tool routing.');
+  });
+
   it("removes servers and shuts down all clients", async () => {
     const alphaClient = createClient();
     const betaClient = createClient();
@@ -108,6 +123,24 @@ describe("McpRegistry", () => {
     expect(alphaClient.disconnect).toHaveBeenCalledTimes(1);
 
     await registry.shutdown();
+    expect(betaClient.disconnect).toHaveBeenCalledTimes(1);
+    await expect(registry.getAllTools()).resolves.toEqual([]);
+  });
+
+  it("continues shutting down remaining clients when one disconnect fails", async () => {
+    const alphaClient = createClient({});
+    const betaClient = createClient({});
+    alphaClient.disconnect.mockRejectedValueOnce(new Error("alpha failed"));
+    createMcpClientMock.mockReturnValueOnce(alphaClient).mockReturnValueOnce(betaClient);
+
+    const registry = new McpRegistry();
+    await registry.addServer(serverA);
+    await registry.addServer(serverB);
+
+    await expect(registry.shutdown()).rejects.toThrow(
+      "Failed to disconnect MCP server alpha: alpha failed",
+    );
+    expect(alphaClient.disconnect).toHaveBeenCalledTimes(1);
     expect(betaClient.disconnect).toHaveBeenCalledTimes(1);
     await expect(registry.getAllTools()).resolves.toEqual([]);
   });

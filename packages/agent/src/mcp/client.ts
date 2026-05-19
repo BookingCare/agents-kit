@@ -1,20 +1,12 @@
+import { readFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 export interface McpServerConfig {
   name: string;
-  transport: "stdio" | "sse" | "websocket";
-  connection:
-    | { type: "stdio"; command: string; args?: string[] }
-    | { type: "sse"; url: string }
-    | { type: "websocket"; [key: string]: unknown };
-  auth?: {
-    type: "bearer" | "basic" | "none";
-    token?: string;
-    username?: string;
-    password?: string;
-  };
+  transport: "stdio" | "sse";
+  connection: { type: "stdio"; command: string; args?: string[] } | { type: "sse"; url: string };
 }
 
 export interface McpTool {
@@ -30,13 +22,15 @@ export interface McpClient {
   callTool(name: string, args: Record<string, unknown>): Promise<string>;
 }
 
+const packageVersion = JSON.parse(
+  readFileSync(new URL("../../package.json", import.meta.url), "utf-8"),
+) as { version: string };
+
 export function createMcpClient(config: McpServerConfig): McpClient {
   if (config.transport !== config.connection.type) {
-    throw new Error(`Unsupported MCP transport: ${config.transport}`);
-  }
-
-  if (config.transport !== "stdio" && config.transport !== "sse") {
-    throw new Error(`Unsupported MCP transport: ${config.transport}`);
+    throw new Error(
+      `MCP transport/connection mismatch: transport "${config.transport}" does not match connection.type "${config.connection.type}"`,
+    );
   }
 
   return new SdkMcpClient(config);
@@ -70,7 +64,7 @@ class SdkMcpClient implements McpClient {
     this.client = new Client(
       {
         name: config.name,
-        version: "0.4.1",
+        version: packageVersion.version,
       },
       {
         capabilities: {},

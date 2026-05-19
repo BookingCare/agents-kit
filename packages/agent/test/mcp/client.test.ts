@@ -44,7 +44,6 @@ describe("createMcpClient", () => {
     name: "test-server",
     transport: "sse",
     connection: { type: "sse", url: "http://example.com/sse" },
-    auth: { type: "bearer", token: "secret-token" },
   };
 
   beforeEach(() => {
@@ -123,13 +122,25 @@ describe("createMcpClient", () => {
     );
   });
 
+  it("throws on mismatched transports and connection types", () => {
+    expect(() =>
+      createMcpClient({
+        ...config,
+        transport: "sse",
+        connection: { type: "stdio", command: "node" },
+      } as McpServerConfig),
+    ).toThrow(
+      'MCP transport/connection mismatch: transport "sse" does not match connection.type "stdio"',
+    );
+  });
+
   it("throws on unsupported transports", () => {
     expect(() =>
       createMcpClient({
         ...config,
         transport: "websocket",
         connection: { type: "websocket" },
-      }),
+      } as unknown as McpServerConfig),
     ).toThrow("Unsupported MCP transport: websocket");
   });
 

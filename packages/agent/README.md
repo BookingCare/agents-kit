@@ -57,7 +57,9 @@ import { Agent } from "@bookingcare/agent";
 import { getModel } from "@bookingcare/ai";
 
 const agent = new Agent({
-  model: getModel("gpt-4o-mini")!,
+  initialState: {
+    model: getModel("gpt-4o-mini")!,
+  },
   mcpServers: [
     {
       name: "filesystem",
@@ -157,7 +159,7 @@ loadMcpConfig?: boolean;
 
 #### `AgentOptions.mcpConfigPath`
 
-Optional path to the MCP config file or directory used for loading MCP servers.
+Optional path to the MCP config file or workspace directory used for loading MCP servers.
 
 ```typescript
 mcpConfigPath?: string;

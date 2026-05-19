@@ -244,13 +244,7 @@ export async function createToolDispatch(
     tools.push(...mcpTools);
 
     for (const mcpTool of mcpTools) {
-      dispatch[mcpTool.name] = async (args) => {
-        try {
-          return await mcpRegistry.callTool(mcpTool.name, args);
-        } catch (error) {
-          return error instanceof Error ? error.message : String(error);
-        }
-      };
+      dispatch[mcpTool.name] = async (args) => await mcpRegistry.callTool(mcpTool.name, args);
     }
   }
 

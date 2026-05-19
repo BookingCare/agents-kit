@@ -348,6 +348,30 @@ describe("tool dispatch", () => {
     await expect(dispatch["alpha:lookup"]({ query: "hello" })).resolves.toBe("mcp-result");
     expect(calls).toEqual([{ name: "alpha:lookup", args: { query: "hello" } }]);
   });
+
+  it("propagates MCP tool failures to the agent loop", async () => {
+    const mcpRegistry = {
+      getAllTools: async () => [
+        tool({
+          name: "alpha:lookup",
+          description: "Lookup",
+          parameters: Type.Object({}),
+        }),
+      ],
+      callTool: async () => {
+        throw new Error("mcp failed");
+      },
+    };
+
+    const { dispatch } = await createToolDispatch(
+      workdir,
+      undefined,
+      undefined,
+      mcpRegistry as unknown as McpRegistry,
+    );
+
+    await expect(dispatch["alpha:lookup"]({ query: "hello" })).rejects.toThrow("mcp failed");
+  });
 });
 
 // --- Todo tracking ---
