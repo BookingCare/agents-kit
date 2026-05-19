@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Added
+
+- MCP (Model Context Protocol) server support with SSE and stdio transports
+- `McpRegistry` for managing multiple MCP server connections
+- JSON Schema to TypeBox adapter for MCP tool schemas (`convertJsonSchemaToTypeBox`)
+- MCP configuration file loading from `.mcp.json` and `.mcp/config.json`
+- `AgentOptions.mcpServers` and `AgentOptions.mcpConfigPath` for MCP integration
+- `AgentOptions.loadMcpConfig` to auto-load MCP config from workspace
+- `createToolDispatch()` now accepts optional `mcpRegistry` parameter
+
+### Changed
+
+- `createToolDispatch()` is now async (breaking change for direct callers)
+- MCP tools are prefixed with server name (e.g., `filesystem:read_file`) to avoid conflicts
+
+### Dependencies
+
+- Added `@modelcontextprotocol/sdk@^1.29.0` for MCP protocol implementation
+
+### Internal
+
+- Added `packages/agent/src/mcp/` module with client, registry, schema-adapter, and config utilities
+- Added 20 tests covering MCP client, registry, schema adapter, config, and agent integration
+
 ## [0.4.1] - 2026-05-18
 
 ### Added
