@@ -30,6 +30,7 @@
   "dependencies": {
     "@bookingcare/ai": "^0.4.1",
     "@bookingcare/infra": "^0.4.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@sinclair/typebox": "^0.34.49"
   }
 }

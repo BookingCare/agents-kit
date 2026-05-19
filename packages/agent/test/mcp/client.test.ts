@@ -1,26 +1,34 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const connectMock = vi.fn();
+const closeMock = vi.fn();
+const listToolsMock = vi.fn();
+const callToolMock = vi.fn();
+const clientCtorMock = vi.fn();
+const transportCtorMock = vi.fn();
+
+vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
+  Client: class {
+    connect = connectMock;
+    close = closeMock;
+    listTools = listToolsMock;
+    callTool = callToolMock;
+
+    constructor(...args: unknown[]) {
+      clientCtorMock(...args);
+    }
+  },
+}));
+
+vi.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
+  SSEClientTransport: class {
+    constructor(...args: unknown[]) {
+      transportCtorMock(...args);
+    }
+  },
+}));
+
 import { createMcpClient, type McpServerConfig } from "../../src/mcp/client.js";
-
-function sseResponse(body: string, status = 200): Response {
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode(body));
-      controller.close();
-    },
-  });
-
-  return new Response(stream, {
-    status,
-    headers: { "Content-Type": "text/event-stream" },
-  });
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
 
 describe("createMcpClient", () => {
   const config: McpServerConfig = {
@@ -31,33 +39,25 @@ describe("createMcpClient", () => {
   };
 
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn());
+    connectMock.mockReset();
+    closeMock.mockReset();
+    listToolsMock.mockReset();
+    callToolMock.mockReset();
+    clientCtorMock.mockReset();
+    transportCtorMock.mockReset();
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    vi.clearAllMocks();
   });
 
-  it("connects, lists tools, and calls tools over SSE transport", async () => {
-    const fetchMock = vi.mocked(fetch);
-    fetchMock
-      .mockResolvedValueOnce(sseResponse("event: endpoint\ndata: http://example.com/messages\n\n"))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          jsonrpc: "2.0",
-          id: 1,
-          result: {
-            tools: [{ name: "echo", description: "Echo", inputSchema: { type: "object" } }],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          jsonrpc: "2.0",
-          id: 2,
-          result: { content: [{ type: "text", text: "ok" }] },
-        }),
-      );
+  it("connects, lists tools, and calls tools over the SDK transport", async () => {
+    listToolsMock.mockResolvedValue({
+      tools: [{ name: "echo", description: "Echo", inputSchema: { type: "object" } }],
+    });
+    callToolMock.mockResolvedValue({
+      content: [{ type: "text", text: "ok" }],
+    });
 
     const client = createMcpClient(config);
     await client.connect();
@@ -67,54 +67,45 @@ describe("createMcpClient", () => {
     ]);
     await expect(client.callTool("echo", { message: "hi" })).resolves.toBe("ok");
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "http://example.com/sse", expect.any(Object));
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "http://example.com/messages",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({ authorization: "Bearer secret-token" }),
+    expect(transportCtorMock).toHaveBeenCalledWith(new URL("http://example.com/sse"));
+    expect(clientCtorMock).toHaveBeenCalledWith(
+      { name: "test-server", version: "0.4.1" },
+      { capabilities: {} },
+    );
+    expect(connectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns an empty string for non-text tool content", async () => {
+    callToolMock.mockResolvedValue({ content: [{ type: "resource", resource: { text: "x" } }] });
+
+    const client = createMcpClient(config);
+    await client.connect();
+
+    await expect(client.callTool("echo", {})).resolves.toBe("");
+  });
+
+  it("throws on invalid connection urls", () => {
+    expect(() =>
+      createMcpClient({
+        ...config,
+        connection: { type: "sse", url: "" },
       }),
-    );
+    ).toThrow("MCP SSE connection requires a url");
   });
 
-  it("falls back to a derived message endpoint when the SSE stream omits one", async () => {
-    const fetchMock = vi.mocked(fetch);
-    fetchMock
-      .mockResolvedValueOnce(sseResponse(": keep-alive\n\n"))
-      .mockResolvedValueOnce(jsonResponse({ jsonrpc: "2.0", id: 1, result: { tools: [] } }));
-
-    const client = createMcpClient(config);
-    await client.connect();
-    await client.listTools();
-
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://example.com/messages", expect.any(Object));
+  it("throws on unsupported transports", () => {
+    expect(() =>
+      createMcpClient({
+        ...config,
+        transport: "stdio",
+        connection: { type: "stdio" },
+      }),
+    ).toThrow("Unsupported MCP transport: stdio");
   });
 
-  it("throws on connection failures", async () => {
-    const fetchMock = vi.mocked(fetch);
-    fetchMock.mockRejectedValueOnce(new Error("network down"));
-
+  it("closes the sdk client on disconnect", async () => {
     const client = createMcpClient(config);
-    await expect(client.connect()).rejects.toThrow(
-      "Failed to connect to MCP SSE server: network down",
-    );
-  });
-
-  it("throws MCP errors returned from JSON-RPC", async () => {
-    const fetchMock = vi.mocked(fetch);
-    fetchMock
-      .mockResolvedValueOnce(sseResponse("event: endpoint\ndata: http://example.com/messages\n\n"))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          jsonrpc: "2.0",
-          id: 1,
-          error: { code: -32601, message: "Method not found" },
-        }),
-      );
-
-    const client = createMcpClient(config);
-    await client.connect();
-    await expect(client.listTools()).rejects.toThrow("MCP error -32601: Method not found");
+    await client.disconnect();
+    expect(closeMock).toHaveBeenCalledTimes(1);
   });
 });
