@@ -93,7 +93,7 @@ export async function agentLoop(query: string, options: AgentLoopOptions) {
         skillLoader: undefined,
         todoManager: undefined,
       }
-    : createToolDispatch(workdir, skillsDir);
+    : await createToolDispatch(workdir, skillsDir);
 
   // Build system prompt with skill descriptions (Layer 1)
   let systemPrompt = system ?? "";

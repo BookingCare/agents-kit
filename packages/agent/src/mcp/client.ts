@@ -141,14 +141,16 @@ class SseMcpClient implements McpClient {
       params,
     };
 
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    this.headers.forEach((value, key) => {
+      headers[key] = value;
+    });
+
     let response: Response;
     try {
       response = await fetch(this.messageEndpoint, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...Object.fromEntries(this.headers.entries()),
-        },
+        headers,
         body: JSON.stringify(request),
       });
     } catch (error) {

@@ -59,7 +59,7 @@ describe("sandbox dispatch integration", () => {
   it("routes bash through the sandbox and awaits async tool execution", async () => {
     const workdir = createTempDir("agent-sandbox-bash-");
     const sandbox = createSandbox({ kind: "local", workdir });
-    const dispatchBundle = createToolDispatch(workdir, undefined, sandbox);
+    const dispatchBundle = await createToolDispatch(workdir, undefined, sandbox);
     const agentTools = toAgentTools(dispatchBundle);
 
     const streamFn = createMockStream([
@@ -102,7 +102,7 @@ describe("sandbox dispatch integration", () => {
   it("routes read/write/edit through the sandbox", async () => {
     const workdir = createTempDir("agent-sandbox-files-");
     const sandbox = createSandbox({ kind: "local", workdir });
-    const dispatchBundle = createToolDispatch(workdir, undefined, sandbox);
+    const dispatchBundle = await createToolDispatch(workdir, undefined, sandbox);
 
     await dispatchBundle.dispatch.write_file({
       path: "nested/file.txt",
@@ -125,7 +125,7 @@ describe("sandbox dispatch integration", () => {
   it("preserves the 50KB default cap for sandboxed read_file", async () => {
     const workdir = createTempDir("agent-sandbox-read-cap-");
     const sandbox = createSandbox({ kind: "local", workdir });
-    const dispatchBundle = createToolDispatch(workdir, undefined, sandbox);
+    const dispatchBundle = await createToolDispatch(workdir, undefined, sandbox);
 
     writeFileSync(join(workdir, "big.txt"), "a".repeat(60_000));
 
@@ -137,7 +137,7 @@ describe("sandbox dispatch integration", () => {
   it("enforces timeout through the dispatch flow", async () => {
     const workdir = createTempDir("agent-sandbox-timeout-");
     const sandbox = createSandbox({ kind: "local", workdir, timeout: 50 });
-    const dispatchBundle = createToolDispatch(workdir, undefined, sandbox);
+    const dispatchBundle = await createToolDispatch(workdir, undefined, sandbox);
 
     await expect(
       dispatchBundle.dispatch.bash({ command: `"${process.execPath}" -e "while(true){}"` }),
@@ -147,7 +147,7 @@ describe("sandbox dispatch integration", () => {
   it("enforces output limits through the dispatch flow", async () => {
     const workdir = createTempDir("agent-sandbox-output-");
     const sandbox = createSandbox({ kind: "local", workdir, maxOutput: 100 });
-    const dispatchBundle = createToolDispatch(workdir, undefined, sandbox);
+    const dispatchBundle = await createToolDispatch(workdir, undefined, sandbox);
 
     await expect(
       dispatchBundle.dispatch.bash({
