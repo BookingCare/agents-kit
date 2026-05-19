@@ -46,6 +46,135 @@ const { messages, iterations } = await agentLoop(query, {
 
 Returns `{ messages, iterations }` — the full message history and how many loop cycles ran.
 
+## MCP Support
+
+The agent can connect to Model Context Protocol (MCP) servers and expose their tools alongside local tools.
+
+### Basic Usage
+
+```typescript
+import { Agent } from "@bookingcare/agent";
+import { getModel } from "@bookingcare/ai";
+
+const agent = new Agent({
+  model: getModel("gpt-4o-mini")!,
+  mcpServers: [
+    {
+      name: "filesystem",
+      transport: "sse",
+      connection: {
+        type: "sse",
+        url: "http://localhost:3000/sse",
+      },
+    },
+  ],
+});
+
+try {
+  await agent.prompt("List all files in /tmp");
+} finally {
+  await agent.shutdown();
+}
+```
+
+### Configuration File (`.mcp.json`)
+
+```json
+{
+  "servers": [
+    {
+      "name": "github",
+      "transport": "stdio",
+      "connection": {
+        "type": "stdio",
+        "command": "node",
+        "args": ["./mcp-server.js"]
+      }
+    }
+  ]
+}
+```
+
+```typescript
+import { Agent } from "@bookingcare/agent";
+import { getModel } from "@bookingcare/ai";
+
+const agent = new Agent({
+  model: getModel("gpt-4o-mini")!,
+  loadMcpConfig: true,
+});
+```
+
+### Supported Transports
+
+- `sse` — Server-Sent Events
+- `stdio` — Standard input/output for local MCP servers
+
+WebSocket transport is not supported.
+
+### Tool Naming
+
+MCP tools are namespaced as `server:tool` to avoid collisions.
+
+- Server: `filesystem`
+- Tool: `read_file`
+- Agent sees: `filesystem:read_file`
+
+### Shutdown
+
+Always call `agent.shutdown()` when you are done so MCP connections are closed cleanly.
+
+```typescript
+const agent = new Agent({
+  model,
+  mcpServers,
+});
+
+try {
+  await agent.prompt("...");
+} finally {
+  await agent.shutdown();
+}
+```
+
+### API Reference
+
+#### `AgentOptions.mcpServers`
+
+List of MCP server configs to connect when the agent starts.
+
+```typescript
+mcpServers?: McpServerConfig[];
+```
+
+#### `AgentOptions.loadMcpConfig`
+
+When `true`, the agent loads MCP servers from `.mcp.json` before starting.
+
+```typescript
+loadMcpConfig?: boolean;
+```
+
+#### `AgentOptions.mcpConfigPath`
+
+Optional path to the MCP config file or directory used for loading MCP servers.
+
+```typescript
+mcpConfigPath?: string;
+```
+
+#### `McpServerConfig`
+
+Configuration for one MCP server connection.
+
+```typescript
+interface McpServerConfig {
+  name: string;
+  transport: "sse" | "stdio";
+  connection: { type: "sse"; url: string } | { type: "stdio"; command: string; args?: string[] };
+}
+```
+
 ## Tools
 
 Four file tools are available when `workdir` is set (or passed to `createToolDispatch`):
