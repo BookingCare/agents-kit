@@ -1,10 +1,14 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 export interface McpServerConfig {
   name: string;
   transport: "stdio" | "sse" | "websocket";
-  connection: { type: "stdio" | "sse" | "websocket"; [key: string]: unknown };
+  connection:
+    | { type: "stdio"; command: string; args?: string[] }
+    | { type: "sse"; url: string }
+    | { type: "websocket"; [key: string]: unknown };
   auth?: {
     type: "bearer" | "basic" | "none";
     token?: string;
@@ -27,7 +31,11 @@ export interface McpClient {
 }
 
 export function createMcpClient(config: McpServerConfig): McpClient {
-  if (config.transport !== "sse" || config.connection.type !== "sse") {
+  if (config.transport !== config.connection.type) {
+    throw new Error(`Unsupported MCP transport: ${config.transport}`);
+  }
+
+  if (config.transport !== "stdio" && config.transport !== "sse") {
     throw new Error(`Unsupported MCP transport: ${config.transport}`);
   }
 
@@ -36,15 +44,29 @@ export function createMcpClient(config: McpServerConfig): McpClient {
 
 class SdkMcpClient implements McpClient {
   private readonly client: Client;
-  private readonly transport: SSEClientTransport;
+  private readonly transport: SSEClientTransport | StdioClientTransport;
 
   constructor(config: McpServerConfig) {
-    const url = config.connection.url;
-    if (typeof url !== "string" || url.length === 0) {
-      throw new Error("MCP SSE connection requires a url");
+    if (config.transport === "stdio") {
+      const { command, args = [] } = config.connection as Extract<
+        McpServerConfig["connection"],
+        { type: "stdio" }
+      >;
+      this.transport = new StdioClientTransport({
+        command,
+        args,
+      });
+    } else if (config.transport === "sse") {
+      const { url } = config.connection as Extract<McpServerConfig["connection"], { type: "sse" }>;
+      if (typeof url !== "string" || url.length === 0) {
+        throw new Error("MCP SSE connection requires a url");
+      }
+
+      this.transport = new SSEClientTransport(new URL(url));
+    } else {
+      throw new Error(`Unsupported MCP transport: ${config.transport}`);
     }
 
-    this.transport = new SSEClientTransport(new URL(url));
     this.client = new Client(
       {
         name: config.name,
@@ -79,6 +101,8 @@ class SdkMcpClient implements McpClient {
       arguments: args,
     });
 
-    return result.content.map((item) => (item.type === "text" ? (item.text ?? "") : "")).join("");
+    return (result.content as Array<{ type: string; text?: string }>)
+      .map((item) => (item.type === "text" ? (item.text ?? "") : ""))
+      .join("");
   }
 }

@@ -6,6 +6,7 @@ const listToolsMock = vi.fn();
 const callToolMock = vi.fn();
 const clientCtorMock = vi.fn();
 const transportCtorMock = vi.fn();
+const stdioTransportCtorMock = vi.fn();
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
   Client: class {
@@ -28,6 +29,14 @@ vi.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
   },
 }));
 
+vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
+  StdioClientTransport: class {
+    constructor(...args: unknown[]) {
+      stdioTransportCtorMock(...args);
+    }
+  },
+}));
+
 import { createMcpClient, type McpServerConfig } from "../../src/mcp/client.js";
 
 describe("createMcpClient", () => {
@@ -45,6 +54,7 @@ describe("createMcpClient", () => {
     callToolMock.mockReset();
     clientCtorMock.mockReset();
     transportCtorMock.mockReset();
+    stdioTransportCtorMock.mockReset();
   });
 
   afterEach(() => {
@@ -93,14 +103,34 @@ describe("createMcpClient", () => {
     ).toThrow("MCP SSE connection requires a url");
   });
 
+  it("creates a stdio transport with the provided command and args", async () => {
+    const stdioConfig: McpServerConfig = {
+      name: "stdio-server",
+      transport: "stdio",
+      connection: { type: "stdio", command: "node", args: ["server.js"] },
+    };
+
+    const client = createMcpClient(stdioConfig);
+    await client.connect();
+
+    expect(stdioTransportCtorMock).toHaveBeenCalledWith({
+      command: "node",
+      args: ["server.js"],
+    });
+    expect(clientCtorMock).toHaveBeenCalledWith(
+      { name: "stdio-server", version: "0.4.1" },
+      { capabilities: {} },
+    );
+  });
+
   it("throws on unsupported transports", () => {
     expect(() =>
       createMcpClient({
         ...config,
-        transport: "stdio",
-        connection: { type: "stdio" },
+        transport: "websocket",
+        connection: { type: "websocket" },
       }),
-    ).toThrow("Unsupported MCP transport: stdio");
+    ).toThrow("Unsupported MCP transport: websocket");
   });
 
   it("closes the sdk client on disconnect", async () => {

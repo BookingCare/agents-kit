@@ -14,6 +14,7 @@ import {
 } from "@bookingcare/ai";
 import type { Store, AgentInfo } from "@bookingcare/infra";
 import type { McpServerConfig } from "./mcp/client.js";
+import { loadMcpConfig } from "./mcp/config.js";
 import { McpRegistry } from "./mcp/registry.js";
 import { NotFoundError, serializeAgentState, createTodoSnapshot } from "@bookingcare/infra";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.js";
@@ -149,6 +150,10 @@ export interface AgentOptions {
   todoManager?: TodoManager;
   /** Optional context manager for token budget management. */
   contextManager?: ContextManager;
+  /** Load MCP server configurations from the local config file. */
+  loadMcpConfig?: boolean;
+  /** Directory to resolve MCP config files from. */
+  mcpConfigPath?: string;
   /** Optional MCP server configurations to connect during initialization. */
   mcpServers?: McpServerConfig[];
   /** Optional pre-configured MCP registry. */
@@ -278,10 +283,14 @@ export class Agent {
     this.mcpRegistry = options.mcpRegistry;
     this.mcpInitialization = this.mcpRegistry
       ? Promise.resolve()
-      : this.initializeMcpServers(options.mcpServers ?? []);
+      : this.initializeMcpServers(options);
   }
 
-  private async initializeMcpServers(servers: McpServerConfig[]): Promise<void> {
+  private async initializeMcpServers(options: AgentOptions): Promise<void> {
+    const loadedConfig = options.loadMcpConfig
+      ? await loadMcpConfig(options.mcpConfigPath)
+      : { servers: [] };
+    const servers = [...loadedConfig.servers, ...(options.mcpServers ?? [])];
     if (servers.length === 0) return;
 
     const registry = new McpRegistry();

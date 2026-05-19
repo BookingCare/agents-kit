@@ -352,6 +352,10 @@ await resumed.prompt("Continue from where we left off");
 - `sessionId` must be provided or auto-generated to persist. Without a `store`, the agent is purely in-memory and `sessionId` may be `undefined`.
 - Streaming state (`streamingMessage`, `pendingToolCalls`) is intentionally not persisted. If the process crashes mid-run, the last completed `agent_end` state is what gets restored.
 
+## MCP Transport Support
+
+The MCP client currently supports `stdio` and `sse` transports. WebSocket transport is intentionally disabled until `@modelcontextprotocol/sdk` exports `WebSocketClientTransport`.
+
 ## Architecture
 
 ```
