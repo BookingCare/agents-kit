@@ -283,6 +283,43 @@ describe("JSONStore", () => {
     });
   });
 
+  describe("metrics", () => {
+    it("tracks operations and storage", async () => {
+      const sessionId = "metrics";
+      const messages = createMessages(sessionId);
+
+      await store.saveMessages(sessionId, messages);
+      await store.saveInfo("other", createAgentInfo("other"));
+      await store.loadMessages(sessionId, { limit: 2 });
+      await store.exists(sessionId);
+      await store.list("met");
+      await store.delete("other");
+
+      const metrics = await store.getMetrics();
+
+      expect(metrics.operations).toEqual({
+        saves: 2,
+        loads: 1,
+        queries: 2,
+        deletes: 1,
+      });
+      expect(metrics.storage.totalAgents).toBe(1);
+      expect(metrics.storage.totalMessages).toBe(messages.length);
+      expect(metrics.storage.dbSizeBytes).toBeGreaterThan(0);
+      expect(metrics.performance.avgLatencyMs).toBeGreaterThanOrEqual(0);
+      expect(metrics.performance.maxLatencyMs).toBeGreaterThanOrEqual(
+        metrics.performance.minLatencyMs,
+      );
+      expect(metrics.collectedAt).toBeGreaterThan(0);
+    });
+  });
+
+  describe("close", () => {
+    it("closes cleanly", async () => {
+      await expect(store.close()).resolves.toBeUndefined();
+    });
+  });
+
   describe("error handling", () => {
     it("throws CorruptDataError for invalid JSON in messages", async () => {
       const sessionId = "corrupt";
@@ -320,6 +357,12 @@ describe("JSONStore", () => {
     it("throws StoreError for path separators in sessionId", async () => {
       await expect(store.loadMessages("a/b")).rejects.toThrow(StoreError);
       await expect(store.saveMessages("a\\b", [])).rejects.toThrow(StoreError);
+    });
+
+    it("throws StoreError for overly long sessionId", async () => {
+      const sessionId = "a".repeat(192);
+
+      await expect(store.saveMessages(sessionId, [])).rejects.toThrow(StoreError);
     });
   });
 

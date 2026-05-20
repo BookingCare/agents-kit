@@ -1,4 +1,5 @@
 import type { Message } from "@bookingcare/ai";
+import type { PoolOptions } from "mysql2/promise";
 
 /** Alias for Message from @bookingcare/ai for semantic clarity in storage context. */
 export type StoredMessage = Message;
@@ -34,6 +35,50 @@ export interface LoadMessagesOptions {
   since?: number;
 }
 
+/** Operation counts collected by a Store instance. */
+export interface StoreOperationCounts {
+  saves: number;
+  loads: number;
+  queries: number;
+  deletes: number;
+}
+
+/** Latency snapshot collected by a Store instance. */
+export interface StorePerformanceMetrics {
+  avgLatencyMs: number;
+  maxLatencyMs: number;
+  minLatencyMs: number;
+}
+
+/** Storage snapshot collected by a Store instance. */
+export interface StoreStorageMetrics {
+  totalAgents: number;
+  totalMessages: number;
+  dbSizeBytes: number;
+}
+
+/** Aggregated Store metrics snapshot. */
+export interface StoreMetrics {
+  operations: StoreOperationCounts;
+  performance: StorePerformanceMetrics;
+  storage: StoreStorageMetrics;
+  collectedAt: number;
+}
+
+export type StoreOperationKind = keyof StoreOperationCounts;
+
+export interface JSONStoreConfig {
+  type: "json";
+  baseDir: string;
+}
+
+export interface MySQLStoreConfig {
+  type: "mysql";
+  options: PoolOptions;
+}
+
+export type StoreConfig = JSONStoreConfig | MySQLStoreConfig;
+
 /**
  * Pluggable storage interface for agent sessions.
  *
@@ -41,6 +86,12 @@ export interface LoadMessagesOptions {
  * All methods are async and may throw {@link StoreError} subclasses.
  */
 export interface Store {
+  /** Close any underlying resources. */
+  close(): Promise<void>;
+
+  /** Collect metrics for the store and persisted data. */
+  getMetrics(): Promise<StoreMetrics>;
+
   /** Persist messages for a session. Replaces existing message list. */
   saveMessages(sessionId: string, messages: StoredMessage[]): Promise<void>;
 

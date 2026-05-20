@@ -5,6 +5,11 @@ export type {
   TodoSnapshot,
   AgentInfo,
   LoadMessagesOptions,
+  StoreOperationCounts,
+  StorePerformanceMetrics,
+  StoreStorageMetrics,
+  StoreMetrics,
+  StoreConfig,
   Store,
 } from "./types.js";
 
@@ -15,5 +20,8 @@ export { StoreError, NotFoundError, CorruptDataError } from "./errors.js";
 export { serializeAgentState, createTodoSnapshot } from "./utils/serialize.js";
 
 // --- Providers ---
+export { createStore } from "./factory.js";
 export { JSONStore } from "./providers/json-store.js";
 export type { JSONStoreOptions } from "./providers/json-store.js";
+export { MySQLStore } from "./providers/mysql-store.js";
+export type { MySQLStoreOptions, MySQLPool, MySQLConnection } from "./providers/mysql-store.js";
