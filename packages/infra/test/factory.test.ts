@@ -1,35 +1,37 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { createSandbox } from "../src/index.js";
-import type { SandboxOptions } from "../src/types.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createStore, JSONStore, MySQLStore } from "../src/index.js";
 
-let workdir: string | undefined;
-
-afterEach(() => {
-  if (workdir) {
-    rmSync(workdir, { recursive: true, force: true });
-    workdir = undefined;
-  }
-});
-
-describe("createSandbox", () => {
-  it("creates a local sandbox and workdir", () => {
-    workdir = join(tmpdir(), `infra-factory-${Date.now()}`);
-    const sandbox = createSandbox({ kind: "local", workdir });
-
-    expect(existsSync(workdir)).toBe(true);
-    expect(sandbox).toHaveProperty("exec");
-    expect(sandbox).toHaveProperty("readFile");
-    expect(sandbox).toHaveProperty("writeFile");
-    expect(sandbox).toHaveProperty("editFile");
+describe("createStore", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it("fails fast for unsupported kinds", () => {
-    workdir = join(tmpdir(), `infra-factory-${Date.now()}`);
-    expect(() => createSandbox({ kind: "bogus" as never, workdir } as SandboxOptions)).toThrow(
-      "Unsupported sandbox kind: bogus",
-    );
+  it("creates a JSON store", async () => {
+    const store = {} as JSONStore;
+    const createSpy = vi.spyOn(JSONStore, "create").mockResolvedValue(store);
+
+    await expect(createStore({ type: "json", baseDir: "./data" })).resolves.toBe(store);
+    expect(createSpy).toHaveBeenCalledWith({ baseDir: "./data" });
+  });
+
+  it("creates a MySQL store", async () => {
+    const store = {} as MySQLStore;
+    const createSpy = vi.spyOn(MySQLStore, "create").mockResolvedValue(store);
+
+    await expect(
+      createStore({
+        type: "mysql",
+        options: {
+          host: "127.0.0.1",
+          user: "agents",
+          database: "agents",
+        },
+      }),
+    ).resolves.toBe(store);
+    expect(createSpy).toHaveBeenCalledWith({
+      host: "127.0.0.1",
+      user: "agents",
+      database: "agents",
+    });
   });
 });

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `createStore()` factory for JSON and MySQL persistence backends.
+- Added `MySQLStore` as a MySQL-backed `Store` implementation for session persistence.
+
 ## [0.4.1] - 2026-05-18
 
 ## [0.4.0] - 2026-05-18

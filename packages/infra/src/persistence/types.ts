@@ -1,4 +1,5 @@
 import type { Message } from "@bookingcare/ai";
+import type { PoolOptions } from "mysql2/promise";
 
 /** Alias for Message from @bookingcare/ai for semantic clarity in storage context. */
 export type StoredMessage = Message;
@@ -33,6 +34,18 @@ export interface LoadMessagesOptions {
   limit?: number;
   since?: number;
 }
+
+export interface JSONStoreConfig {
+  type: "json";
+  baseDir: string;
+}
+
+export interface MySQLStoreConfig {
+  type: "mysql";
+  options: PoolOptions;
+}
+
+export type StoreConfig = JSONStoreConfig | MySQLStoreConfig;
 
 /**
  * Pluggable storage interface for agent sessions.

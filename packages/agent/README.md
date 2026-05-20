@@ -450,13 +450,13 @@ const readFileTool: AgentTool<typeof ReadFileParams> = {
 
 ## Persistence
 
-`Agent` can persist its session state to an external `Store` (e.g. `JSONStore` from `@bookingcare/infra`). When a `store` is provided, the agent automatically saves the full transcript, todo state, and metadata to the store on every `agent_end` event.
+`Agent` can persist its session state to an external `Store` (e.g. `createStore({ type: "json" ... })` or `createStore({ type: "mysql" ... })` from `@bookingcare/infra`). When a `store` is provided, the agent automatically saves the full transcript, todo state, and metadata to the store on every `agent_end` event.
 
 ```typescript
 import { Agent } from "@bookingcare/agent";
-import { JSONStore } from "@bookingcare/infra";
+import { createStore } from "@bookingcare/infra";
 
-const store = await JSONStore.create({ baseDir: "./data" });
+const store = await createStore({ type: "json", baseDir: "./data" });
 
 const agent = new Agent({
   initialState: { model, systemPrompt: "You are helpful.", tools: [] },

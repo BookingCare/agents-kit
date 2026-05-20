@@ -33,3 +33,22 @@ Sandboxed processes do not inherit the parent environment. Pass a safe `PATH` (a
 ## Persistence
 
 `@bookingcare/infra` exports persistence helpers from the root package and the `./persistence` subpath.
+
+```typescript
+import { createStore } from "@bookingcare/infra";
+
+const jsonStore = await createStore({
+  type: "json",
+  baseDir: "./data",
+});
+
+const mysqlStore = await createStore({
+  type: "mysql",
+  options: {
+    host: "127.0.0.1",
+    user: "agents",
+    password: process.env.MYSQL_PASSWORD,
+    database: "agents",
+  },
+});
+```
