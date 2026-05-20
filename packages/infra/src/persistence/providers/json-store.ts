@@ -132,6 +132,8 @@ export class JSONStore implements Store {
     }
   }
 
+  async close(): Promise<void> {}
+
   async list(prefix?: string): Promise<string[]> {
     try {
       const entries = await fs.readdir(this.options.baseDir, { withFileTypes: true });

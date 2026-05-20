@@ -54,6 +54,9 @@ export type StoreConfig = JSONStoreConfig | MySQLStoreConfig;
  * All methods are async and may throw {@link StoreError} subclasses.
  */
 export interface Store {
+  /** Close any underlying resources. */
+  close(): Promise<void>;
+
   /** Persist messages for a session. Replaces existing message list. */
   saveMessages(sessionId: string, messages: StoredMessage[]): Promise<void>;
 

@@ -51,4 +51,7 @@ const mysqlStore = await createStore({
     database: "agents",
   },
 });
+
+// Call close() when shutting down.
+await mysqlStore.close();
 ```

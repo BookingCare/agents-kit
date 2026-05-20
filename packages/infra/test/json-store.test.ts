@@ -283,6 +283,12 @@ describe("JSONStore", () => {
     });
   });
 
+  describe("close", () => {
+    it("closes cleanly", async () => {
+      await expect(store.close()).resolves.toBeUndefined();
+    });
+  });
+
   describe("error handling", () => {
     it("throws CorruptDataError for invalid JSON in messages", async () => {
       const sessionId = "corrupt";

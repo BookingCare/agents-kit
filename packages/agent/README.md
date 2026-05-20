@@ -475,6 +475,9 @@ const resumed = await Agent.resume({
 });
 
 await resumed.prompt("Continue from where we left off");
+
+// Close the store when shutting down.
+await store.close();
 ```
 
 **Notes on resumption**:

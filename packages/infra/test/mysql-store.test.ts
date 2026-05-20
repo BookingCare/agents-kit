@@ -42,6 +42,7 @@ class FakeMySQLPool implements MySQLPool {
   messages = new Map<string, MessageRecord[]>();
   todos = new Map<string, string>();
   infos = new Map<string, string>();
+  ended = false;
 
   private sortedSessionRows(prefix?: string): Array<{ session_id: string }> {
     const rows = [...this.sessions.entries()]
@@ -58,7 +59,9 @@ class FakeMySQLPool implements MySQLPool {
     return new FakeMySQLConnection(this);
   }
 
-  async end(): Promise<void> {}
+  async end(): Promise<void> {
+    this.ended = true;
+  }
 
   async execute(sql: string, params: readonly unknown[] = []): Promise<[unknown, unknown]> {
     const statement = sql.trim().replace(/\s+/g, " ");
@@ -358,6 +361,11 @@ describe("MySQLStore", () => {
 
     await expect(store.saveInfo("a/b", createAgentInfo("a/b"))).rejects.toThrow(StoreError);
     await expect(store.exists(tooLongSessionId)).rejects.toThrow(StoreError);
+  });
+
+  it("closes the pool", async () => {
+    await store.close();
+    expect(pool.ended).toBe(true);
   });
 
   it("throws CorruptDataError for invalid JSON", async () => {

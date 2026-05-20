@@ -3,16 +3,16 @@ import { MySQLStore } from "./providers/mysql-store.js";
 import type { Store, StoreConfig } from "./types.js";
 
 export async function createStore(config: StoreConfig): Promise<Store> {
-  switch (config.type) {
+  const { type } = config;
+
+  switch (type) {
     case "json":
       return JSONStore.create({ baseDir: config.baseDir });
 
     case "mysql":
       return MySQLStore.create(config.options);
 
-    default: {
-      const _exhaustive: never = config;
-      throw new Error(`Unsupported store type: ${_exhaustive}`);
-    }
+    default:
+      throw new Error(`Unsupported store type: ${type}`);
   }
 }
