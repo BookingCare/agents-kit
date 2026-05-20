@@ -162,8 +162,8 @@ export class MySQLStore implements Store {
       } catch (error) {
         try {
           await connection.rollback();
-        } catch {
-          // Ignore rollback failures and rethrow the original error.
+        } catch (rollbackError) {
+          console.error("MySQL transaction rollback failed", rollbackError);
         }
         throw error;
       }
