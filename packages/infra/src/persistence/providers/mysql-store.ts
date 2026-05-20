@@ -3,10 +3,13 @@ import type {
   AgentInfo,
   LoadMessagesOptions,
   Store,
+  StoreMetrics,
+  StoreStorageMetrics,
   StoredMessage,
   TodoSnapshot,
 } from "../types.js";
-import { CorruptDataError } from "../errors.js";
+import { CorruptDataError, StoreError } from "../errors.js";
+import { StoreMetricsTracker } from "../utils/store-metrics.js";
 import { validateSessionId } from "../utils/session-id.js";
 
 export type MySQLStoreOptions = PoolOptions;
@@ -68,6 +71,7 @@ function escapeLike(value: string): string {
  */
 export class MySQLStore implements Store {
   private readonly ready: Promise<void>;
+  private readonly metrics = new StoreMetricsTracker();
 
   constructor(private readonly pool: MySQLPool) {
     this.ready = this.initialize();
@@ -223,27 +227,29 @@ export class MySQLStore implements Store {
     validateSessionId(sessionId);
     await this.ready;
 
-    await this.withTransaction(async (connection) => {
-      const now = Date.now();
-      await this.touchSession(connection, sessionId, now, now);
-      await connection.execute(`DELETE FROM messages WHERE session_id = ?`, [sessionId]);
+    return this.metrics.track("saves", async () => {
+      await this.withTransaction(async (connection) => {
+        const now = Date.now();
+        await this.touchSession(connection, sessionId, now, now);
+        await connection.execute(`DELETE FROM messages WHERE session_id = ?`, [sessionId]);
 
-      const insertSql = `
-        INSERT INTO messages (session_id, seq, role, timestamp, message_json)
-        VALUES (?, ?, ?, ?, ?)
-      `;
+        const insertSql = `
+          INSERT INTO messages (session_id, seq, role, timestamp, message_json)
+          VALUES (?, ?, ?, ?, ?)
+        `;
 
-      for (const [seq, message] of messages.entries()) {
-        await connection.execute(insertSql, [
-          sessionId,
-          seq,
-          message.role,
-          "timestamp" in message && typeof message.timestamp === "number"
-            ? message.timestamp
-            : null,
-          JSON.stringify(message),
-        ]);
-      }
+        for (const [seq, message] of messages.entries()) {
+          await connection.execute(insertSql, [
+            sessionId,
+            seq,
+            message.role,
+            "timestamp" in message && typeof message.timestamp === "number"
+              ? message.timestamp
+              : null,
+            JSON.stringify(message),
+          ]);
+        }
+      });
     });
   }
 
@@ -251,121 +257,179 @@ export class MySQLStore implements Store {
     validateSessionId(sessionId);
     await this.ready;
 
-    const [rows] = await this.pool.execute(
-      `
-        SELECT seq, role, timestamp, message_json
-        FROM messages
-        WHERE session_id = ?
-        ORDER BY seq ASC
-      `,
-      [sessionId],
-    );
-
-    const messages = (rows as MessageRow[]).map((row) => ({
-      message: parseJson<StoredMessage>(sessionId, row.message_json),
-      timestamp: toNumber(row.timestamp),
-    }));
-
-    let result = messages;
-
-    if (opts?.role) {
-      result = result.filter((entry) => entry.message.role === opts.role);
-    }
-
-    if (opts?.since !== undefined) {
-      result = result.filter(
-        (entry) => entry.timestamp !== undefined && entry.timestamp >= opts.since!,
+    return this.metrics.track("loads", async () => {
+      const [rows] = await this.pool.execute(
+        `
+          SELECT seq, role, timestamp, message_json
+          FROM messages
+          WHERE session_id = ?
+          ORDER BY seq ASC
+        `,
+        [sessionId],
       );
-    }
 
-    if (opts?.limit !== undefined && opts.limit > 0) {
-      result = result.slice(-opts.limit);
-    }
+      const messages = (rows as MessageRow[]).map((row) => ({
+        message: parseJson<StoredMessage>(sessionId, row.message_json),
+        timestamp: toNumber(row.timestamp),
+      }));
 
-    return result.map((entry) => entry.message);
+      let result = messages;
+
+      if (opts?.role) {
+        result = result.filter((entry) => entry.message.role === opts.role);
+      }
+
+      if (opts?.since !== undefined) {
+        result = result.filter(
+          (entry) => entry.timestamp !== undefined && entry.timestamp >= opts.since!,
+        );
+      }
+
+      if (opts?.limit !== undefined && opts.limit > 0) {
+        result = result.slice(-opts.limit);
+      }
+
+      return result.map((entry) => entry.message);
+    });
   }
 
   async saveTodos(sessionId: string, snapshot: TodoSnapshot): Promise<void> {
     validateSessionId(sessionId);
     await this.ready;
 
-    await this.withTransaction(async (connection) => {
-      const now = Date.now();
-      await this.touchSession(connection, sessionId, now, now);
-      await this.runJsonUpsert(
-        connection,
-        "todos",
-        "todo_json",
-        sessionId,
-        JSON.stringify(snapshot),
-      );
+    return this.metrics.track("saves", async () => {
+      await this.withTransaction(async (connection) => {
+        const now = Date.now();
+        await this.touchSession(connection, sessionId, now, now);
+        await this.runJsonUpsert(
+          connection,
+          "todos",
+          "todo_json",
+          sessionId,
+          JSON.stringify(snapshot),
+        );
+      });
     });
   }
 
   async loadTodos(sessionId: string): Promise<TodoSnapshot | undefined> {
     validateSessionId(sessionId);
     await this.ready;
-    return this.readSingleJson<TodoSnapshot>(sessionId, "todos", "todo_json");
+
+    return this.metrics.track("loads", async () =>
+      this.readSingleJson<TodoSnapshot>(sessionId, "todos", "todo_json"),
+    );
   }
 
   async saveInfo(sessionId: string, info: AgentInfo): Promise<void> {
     validateSessionId(sessionId);
     await this.ready;
 
-    await this.withTransaction(async (connection) => {
-      await this.touchSession(connection, sessionId, info.createdAt, info.updatedAt);
-      await this.runJsonUpsert(connection, "infos", "info_json", sessionId, JSON.stringify(info));
+    return this.metrics.track("saves", async () => {
+      await this.withTransaction(async (connection) => {
+        await this.touchSession(connection, sessionId, info.createdAt, info.updatedAt);
+        await this.runJsonUpsert(connection, "infos", "info_json", sessionId, JSON.stringify(info));
+      });
     });
   }
 
   async loadInfo(sessionId: string): Promise<AgentInfo | undefined> {
     validateSessionId(sessionId);
     await this.ready;
-    return this.readSingleJson<AgentInfo>(sessionId, "infos", "info_json");
+
+    return this.metrics.track("loads", async () =>
+      this.readSingleJson<AgentInfo>(sessionId, "infos", "info_json"),
+    );
   }
 
   async exists(sessionId: string): Promise<boolean> {
     validateSessionId(sessionId);
     await this.ready;
 
-    const [rows] = await this.pool.execute(`SELECT 1 FROM sessions WHERE session_id = ? LIMIT 1`, [
-      sessionId,
-    ]);
-    return (rows as SessionRow[]).length > 0;
+    return this.metrics.track("queries", async () => {
+      const [rows] = await this.pool.execute(
+        `SELECT 1 FROM sessions WHERE session_id = ? LIMIT 1`,
+        [sessionId],
+      );
+      return (rows as SessionRow[]).length > 0;
+    });
   }
 
   async delete(sessionId: string): Promise<void> {
     validateSessionId(sessionId);
     await this.ready;
 
-    await this.withTransaction(async (connection) => {
-      await connection.execute(`DELETE FROM messages WHERE session_id = ?`, [sessionId]);
-      await connection.execute(`DELETE FROM todos WHERE session_id = ?`, [sessionId]);
-      await connection.execute(`DELETE FROM infos WHERE session_id = ?`, [sessionId]);
-      await connection.execute(`DELETE FROM sessions WHERE session_id = ?`, [sessionId]);
+    return this.metrics.track("deletes", async () => {
+      await this.withTransaction(async (connection) => {
+        await connection.execute(`DELETE FROM messages WHERE session_id = ?`, [sessionId]);
+        await connection.execute(`DELETE FROM todos WHERE session_id = ?`, [sessionId]);
+        await connection.execute(`DELETE FROM infos WHERE session_id = ?`, [sessionId]);
+        await connection.execute(`DELETE FROM sessions WHERE session_id = ?`, [sessionId]);
+      });
     });
   }
 
   async list(prefix?: string): Promise<string[]> {
     await this.ready;
 
-    if (prefix) {
-      const escapedPrefix = escapeLike(prefix);
+    return this.metrics.track("queries", async () => {
+      if (prefix) {
+        const escapedPrefix = escapeLike(prefix);
+        const [rows] = await this.pool.execute(
+          `SELECT session_id FROM sessions WHERE session_id LIKE ? ESCAPE '\\' ORDER BY created_at DESC, session_id ASC`,
+          [`${escapedPrefix}%`],
+        );
+        return (rows as SessionRow[]).map((row) => row.session_id);
+      }
+
       const [rows] = await this.pool.execute(
-        `SELECT session_id FROM sessions WHERE session_id LIKE ? ESCAPE '\\' ORDER BY created_at DESC, session_id ASC`,
-        [`${escapedPrefix}%`],
+        `SELECT session_id FROM sessions ORDER BY created_at DESC, session_id ASC`,
       );
       return (rows as SessionRow[]).map((row) => row.session_id);
-    }
+    });
+  }
 
-    const [rows] = await this.pool.execute(
-      `SELECT session_id FROM sessions ORDER BY created_at DESC, session_id ASC`,
-    );
-    return (rows as SessionRow[]).map((row) => row.session_id);
+  async getMetrics(): Promise<StoreMetrics> {
+    await this.ready;
+    return this.metrics.snapshot(await this.collectStorageMetrics());
   }
 
   async close(): Promise<void> {
     await this.ready;
     await this.pool.end();
+  }
+
+  private async collectStorageMetrics(): Promise<StoreStorageMetrics> {
+    try {
+      const [rows] = await this.pool.execute(
+        `
+          SELECT
+            COALESCE((SELECT COUNT(*) FROM sessions), 0) AS total_agents,
+            COALESCE((SELECT COUNT(*) FROM messages), 0) AS total_messages,
+            COALESCE(
+              (
+                SELECT COALESCE(SUM(data_length + index_length), 0)
+                FROM information_schema.tables
+                WHERE table_schema = DATABASE()
+              ),
+              0
+            ) AS db_size_bytes
+        `,
+      );
+
+      const [row] = rows as Array<{
+        total_agents: number | string | null;
+        total_messages: number | string | null;
+        db_size_bytes: number | string | null;
+      }>;
+
+      return {
+        totalAgents: toNumber(row?.total_agents) ?? 0,
+        totalMessages: toNumber(row?.total_messages) ?? 0,
+        dbSizeBytes: toNumber(row?.db_size_bytes) ?? 0,
+      };
+    } catch (error) {
+      throw new StoreError("Failed to collect store metrics", error);
+    }
   }
 }

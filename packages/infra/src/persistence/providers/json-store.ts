@@ -6,8 +6,11 @@ import type {
   StoredMessage,
   TodoSnapshot,
   AgentInfo,
+  StoreMetrics,
+  StoreStorageMetrics,
 } from "../types.js";
 import { StoreError, CorruptDataError } from "../errors.js";
+import { StoreMetricsTracker } from "../utils/store-metrics.js";
 import { validateSessionId } from "../utils/session-id.js";
 
 export interface JSONStoreOptions {
@@ -26,6 +29,8 @@ export interface JSONStoreOptions {
  * Single-process only. Concurrent writes to the same session are not protected.
  */
 export class JSONStore implements Store {
+  private readonly metrics = new StoreMetricsTracker();
+
   constructor(private readonly options: JSONStoreOptions) {}
 
   /** Create a JSONStore, ensuring the base directory exists. */
@@ -66,90 +71,170 @@ export class JSONStore implements Store {
   }
 
   async saveMessages(sessionId: string, messages: StoredMessage[]): Promise<void> {
-    const sessionDir = await this.ensureSessionDir(sessionId);
-    await this.writeJson(path.join(sessionDir, "messages.json"), messages);
+    return this.metrics.track("saves", async () => {
+      const sessionDir = await this.ensureSessionDir(sessionId);
+      await this.writeJson(path.join(sessionDir, "messages.json"), messages);
+    });
   }
 
   async loadMessages(sessionId: string, opts?: LoadMessagesOptions): Promise<StoredMessage[]> {
-    const filePath = path.join(this.getSessionDir(sessionId), "messages.json");
-    const messages = await this.readJson<StoredMessage[]>(sessionId, filePath);
+    return this.metrics.track("loads", async () => {
+      const filePath = path.join(this.getSessionDir(sessionId), "messages.json");
+      const messages = await this.readJson<StoredMessage[]>(sessionId, filePath);
 
-    if (!messages) {
-      return [];
-    }
+      if (!messages) {
+        return [];
+      }
 
-    let result = messages;
+      let result = messages;
 
-    if (opts?.role) {
-      result = result.filter((m) => m.role === opts.role);
-    }
+      if (opts?.role) {
+        result = result.filter((m) => m.role === opts.role);
+      }
 
-    if (opts?.since !== undefined) {
-      result = result.filter((m) => "timestamp" in m && m.timestamp >= opts.since!);
-    }
+      if (opts?.since !== undefined) {
+        result = result.filter((m) => "timestamp" in m && m.timestamp >= opts.since!);
+      }
 
-    if (opts?.limit !== undefined && opts.limit > 0) {
-      result = result.slice(-opts.limit);
-    }
+      if (opts?.limit !== undefined && opts.limit > 0) {
+        result = result.slice(-opts.limit);
+      }
 
-    return result;
+      return result;
+    });
   }
 
   async saveTodos(sessionId: string, snapshot: TodoSnapshot): Promise<void> {
-    const sessionDir = await this.ensureSessionDir(sessionId);
-    await this.writeJson(path.join(sessionDir, "todos.json"), snapshot);
+    return this.metrics.track("saves", async () => {
+      const sessionDir = await this.ensureSessionDir(sessionId);
+      await this.writeJson(path.join(sessionDir, "todos.json"), snapshot);
+    });
   }
 
   async loadTodos(sessionId: string): Promise<TodoSnapshot | undefined> {
-    const filePath = path.join(this.getSessionDir(sessionId), "todos.json");
-    return this.readJson<TodoSnapshot>(sessionId, filePath);
+    return this.metrics.track("loads", async () => {
+      const filePath = path.join(this.getSessionDir(sessionId), "todos.json");
+      return this.readJson<TodoSnapshot>(sessionId, filePath);
+    });
   }
 
   async saveInfo(sessionId: string, info: AgentInfo): Promise<void> {
-    const sessionDir = await this.ensureSessionDir(sessionId);
-    await this.writeJson(path.join(sessionDir, "info.json"), info);
+    return this.metrics.track("saves", async () => {
+      const sessionDir = await this.ensureSessionDir(sessionId);
+      await this.writeJson(path.join(sessionDir, "info.json"), info);
+    });
   }
 
   async loadInfo(sessionId: string): Promise<AgentInfo | undefined> {
-    const filePath = path.join(this.getSessionDir(sessionId), "info.json");
-    return this.readJson<AgentInfo>(sessionId, filePath);
+    return this.metrics.track("loads", async () => {
+      const filePath = path.join(this.getSessionDir(sessionId), "info.json");
+      return this.readJson<AgentInfo>(sessionId, filePath);
+    });
   }
 
   async exists(sessionId: string): Promise<boolean> {
-    try {
-      await fs.access(this.getSessionDir(sessionId));
-      return true;
-    } catch {
-      return false;
-    }
+    return this.metrics.track("queries", async () => {
+      try {
+        await fs.access(this.getSessionDir(sessionId));
+        return true;
+      } catch {
+        return false;
+      }
+    });
   }
 
   async delete(sessionId: string): Promise<void> {
-    try {
-      await fs.rm(this.getSessionDir(sessionId), { recursive: true, force: true });
-    } catch (error) {
-      throw new StoreError(`Failed to delete session: ${sessionId}`, error);
-    }
+    return this.metrics.track("deletes", async () => {
+      try {
+        await fs.rm(this.getSessionDir(sessionId), { recursive: true, force: true });
+      } catch (error) {
+        throw new StoreError(`Failed to delete session: ${sessionId}`, error);
+      }
+    });
+  }
+
+  async getMetrics(): Promise<StoreMetrics> {
+    return this.metrics.snapshot(await this.collectStorageMetrics());
   }
 
   async close(): Promise<void> {}
 
-  async list(prefix?: string): Promise<string[]> {
+  private async collectStorageMetrics(): Promise<StoreStorageMetrics> {
     try {
       const entries = await fs.readdir(this.options.baseDir, { withFileTypes: true });
-      const ids = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+      const sessionDirs = entries.filter((entry) => entry.isDirectory());
+      let totalMessages = 0;
 
-      if (prefix) {
-        return ids.filter((id) => id.startsWith(prefix)).sort();
+      for (const entry of sessionDirs) {
+        const messages = await this.readJson<StoredMessage[]>(
+          entry.name,
+          path.join(this.options.baseDir, entry.name, "messages.json"),
+        );
+        totalMessages += messages?.length ?? 0;
       }
 
-      return ids.sort();
+      return {
+        totalAgents: sessionDirs.length,
+        totalMessages,
+        dbSizeBytes: await this.collectDirectorySize(this.options.baseDir),
+      };
+    } catch (error) {
+      if (error instanceof StoreError) {
+        throw error;
+      }
+
+      const errno = error as NodeJS.ErrnoException;
+      if (errno.code === "ENOENT") {
+        return { totalAgents: 0, totalMessages: 0, dbSizeBytes: 0 };
+      }
+
+      throw new StoreError("Failed to collect store metrics", error);
+    }
+  }
+
+  private async collectDirectorySize(dirPath: string): Promise<number> {
+    try {
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      let size = 0;
+
+      for (const entry of entries) {
+        const entryPath = path.join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+          size += await this.collectDirectorySize(entryPath);
+        } else {
+          size += (await fs.stat(entryPath)).size;
+        }
+      }
+
+      return size;
     } catch (error) {
       const errno = error as NodeJS.ErrnoException;
       if (errno.code === "ENOENT") {
-        return [];
+        return 0;
       }
-      throw new StoreError("Failed to list sessions", error);
+
+      throw error;
     }
+  }
+
+  async list(prefix?: string): Promise<string[]> {
+    return this.metrics.track("queries", async () => {
+      try {
+        const entries = await fs.readdir(this.options.baseDir, { withFileTypes: true });
+        const ids = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+
+        if (prefix) {
+          return ids.filter((id) => id.startsWith(prefix)).sort();
+        }
+
+        return ids.sort();
+      } catch (error) {
+        const errno = error as NodeJS.ErrnoException;
+        if (errno.code === "ENOENT") {
+          return [];
+        }
+        throw new StoreError("Failed to list sessions", error);
+      }
+    });
   }
 }

@@ -54,4 +54,8 @@ const mysqlStore = await createStore({
 
 // Call close() when shutting down.
 await mysqlStore.close();
+
+const metrics = await mysqlStore.getMetrics();
 ```
+
+`getMetrics()` returns operation counts, latency, and storage totals for the current store snapshot.

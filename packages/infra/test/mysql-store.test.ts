@@ -55,6 +55,32 @@ class FakeMySQLPool implements MySQLPool {
     return rows.map(([sessionId]) => ({ session_id: sessionId }));
   }
 
+  private totalMessages(): number {
+    return [...this.messages.values()].reduce((total, rows) => total + rows.length, 0);
+  }
+
+  private dbSizeBytes(): number {
+    const sessionBytes = [...this.sessions.keys()].reduce((total, sessionId) => {
+      return total + sessionId.length + 16;
+    }, 0);
+    const messageBytes = [...this.messages.values()].reduce((total, rows) => {
+      return (
+        total +
+        rows.reduce((rowTotal, row) => rowTotal + row.message_json.length + row.role.length + 32, 0)
+      );
+    }, 0);
+    const todoBytes = [...this.todos.values()].reduce(
+      (total, value) => total + value.length + 16,
+      0,
+    );
+    const infoBytes = [...this.infos.values()].reduce(
+      (total, value) => total + value.length + 16,
+      0,
+    );
+
+    return sessionBytes + messageBytes + todoBytes + infoBytes;
+  }
+
   async getConnection(): Promise<MySQLConnection> {
     return new FakeMySQLConnection(this);
   }
@@ -150,6 +176,21 @@ class FakeMySQLPool implements MySQLPool {
       const [sessionId, infoJson] = params as [string, string, string];
       this.infos.set(sessionId, infoJson);
       return [[], []];
+    }
+
+    if (
+      statement.startsWith("SELECT COALESCE((SELECT COUNT(*) FROM sessions), 0) AS total_agents,")
+    ) {
+      return [
+        [
+          {
+            total_agents: this.sessions.size,
+            total_messages: this.totalMessages(),
+            db_size_bytes: this.dbSizeBytes(),
+          },
+        ],
+        [],
+      ];
     }
 
     if (
@@ -361,6 +402,35 @@ describe("MySQLStore", () => {
 
     await expect(store.saveInfo("a/b", createAgentInfo("a/b"))).rejects.toThrow(StoreError);
     await expect(store.exists(tooLongSessionId)).rejects.toThrow(StoreError);
+  });
+
+  it("collects metrics", async () => {
+    const sessionId = "metrics";
+    const messages = createMessages();
+
+    await store.saveMessages(sessionId, messages);
+    await store.saveInfo("other", createAgentInfo("other"));
+    await store.loadMessages(sessionId, { limit: 2 });
+    await store.exists(sessionId);
+    await store.list("met");
+    await store.delete("other");
+
+    const metrics = await store.getMetrics();
+
+    expect(metrics.operations).toEqual({
+      saves: 2,
+      loads: 1,
+      queries: 2,
+      deletes: 1,
+    });
+    expect(metrics.storage.totalAgents).toBe(1);
+    expect(metrics.storage.totalMessages).toBe(messages.length);
+    expect(metrics.storage.dbSizeBytes).toBeGreaterThan(0);
+    expect(metrics.performance.avgLatencyMs).toBeGreaterThanOrEqual(0);
+    expect(metrics.performance.maxLatencyMs).toBeGreaterThanOrEqual(
+      metrics.performance.minLatencyMs,
+    );
+    expect(metrics.collectedAt).toBeGreaterThan(0);
   });
 
   it("closes the pool", async () => {

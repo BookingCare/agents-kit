@@ -15,6 +15,10 @@ export type {
   TodoSnapshot,
   AgentInfo,
   LoadMessagesOptions,
+  StoreOperationCounts,
+  StorePerformanceMetrics,
+  StoreStorageMetrics,
+  StoreMetrics,
   StoreConfig,
   Store,
 } from "./persistence/types.js";
