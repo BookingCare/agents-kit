@@ -52,6 +52,8 @@ export { TodoManager } from "./todo-manager.js";
 export type { TodoItem } from "./todo-manager.js";
 export { Agent } from "./agent.js";
 export type { AgentOptions } from "./agent.js";
+export { AgentPool } from "./agent-pool.js";
+export type { AgentPoolOptions } from "./agent-pool.js";
 export * from "./mcp/index.js";
 export { EventBus } from "./event-bus.js";
 export { PermissionManager, DEFAULT_RULES } from "./permission-manager.js";
