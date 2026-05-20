@@ -898,6 +898,9 @@ export class Agent {
       case "message_end":
         this._state.streamingMessage = undefined;
         this._state.messages.push(event.message);
+        if (event.message.role === "assistant" && event.message.errorMessage) {
+          this._state.errorMessage = event.message.errorMessage;
+        }
         break;
 
       case "tool_execution_start": {
