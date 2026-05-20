@@ -21,6 +21,10 @@
 - `createToolDispatch()` is now async (breaking change for direct callers)
 - MCP tools are prefixed with server name (e.g., `filesystem:read_file`) to avoid conflicts
 
+### Fixed
+
+- `Agent.state.errorMessage` now updates when assistant stream failures end without a `turn_end` event
+
 ### Dependencies
 
 - Added `@modelcontextprotocol/sdk@^1.29.0` for MCP protocol implementation
