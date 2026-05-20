@@ -8,6 +8,7 @@ import type {
   AgentInfo,
 } from "../types.js";
 import { StoreError, CorruptDataError } from "../errors.js";
+import { validateSessionId } from "../utils/session-id.js";
 
 export interface JSONStoreOptions {
   /** Directory where session subdirectories will be created. */
@@ -34,14 +35,8 @@ export class JSONStore implements Store {
   }
 
   private getSessionDir(sessionId: string): string {
-    if (sessionId.includes("/") || sessionId.includes("\\")) {
-      throw new StoreError(`Invalid sessionId: ${sessionId}`);
-    }
-    const resolved = path.resolve(this.options.baseDir, sessionId);
-    if (!resolved.startsWith(path.resolve(this.options.baseDir) + path.sep)) {
-      throw new StoreError(`Invalid sessionId: ${sessionId}`);
-    }
-    return resolved;
+    validateSessionId(sessionId);
+    return path.resolve(this.options.baseDir, sessionId);
   }
 
   private async ensureSessionDir(sessionId: string): Promise<string> {

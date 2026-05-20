@@ -321,6 +321,12 @@ describe("JSONStore", () => {
       await expect(store.loadMessages("a/b")).rejects.toThrow(StoreError);
       await expect(store.saveMessages("a\\b", [])).rejects.toThrow(StoreError);
     });
+
+    it("throws StoreError for overly long sessionId", async () => {
+      const sessionId = "a".repeat(192);
+
+      await expect(store.saveMessages(sessionId, [])).rejects.toThrow(StoreError);
+    });
   });
 
   describe("create", () => {

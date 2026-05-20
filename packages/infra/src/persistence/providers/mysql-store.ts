@@ -7,6 +7,7 @@ import type {
   TodoSnapshot,
 } from "../types.js";
 import { CorruptDataError } from "../errors.js";
+import { validateSessionId } from "../utils/session-id.js";
 
 export type MySQLStoreOptions = PoolOptions;
 
@@ -219,6 +220,7 @@ export class MySQLStore implements Store {
   }
 
   async saveMessages(sessionId: string, messages: StoredMessage[]): Promise<void> {
+    validateSessionId(sessionId);
     await this.ready;
 
     await this.withTransaction(async (connection) => {
@@ -246,6 +248,7 @@ export class MySQLStore implements Store {
   }
 
   async loadMessages(sessionId: string, opts?: LoadMessagesOptions): Promise<StoredMessage[]> {
+    validateSessionId(sessionId);
     await this.ready;
 
     const [rows] = await this.pool.execute(
@@ -283,6 +286,7 @@ export class MySQLStore implements Store {
   }
 
   async saveTodos(sessionId: string, snapshot: TodoSnapshot): Promise<void> {
+    validateSessionId(sessionId);
     await this.ready;
 
     await this.withTransaction(async (connection) => {
@@ -299,11 +303,13 @@ export class MySQLStore implements Store {
   }
 
   async loadTodos(sessionId: string): Promise<TodoSnapshot | undefined> {
+    validateSessionId(sessionId);
     await this.ready;
     return this.readSingleJson<TodoSnapshot>(sessionId, "todos", "todo_json");
   }
 
   async saveInfo(sessionId: string, info: AgentInfo): Promise<void> {
+    validateSessionId(sessionId);
     await this.ready;
 
     await this.withTransaction(async (connection) => {
@@ -313,11 +319,13 @@ export class MySQLStore implements Store {
   }
 
   async loadInfo(sessionId: string): Promise<AgentInfo | undefined> {
+    validateSessionId(sessionId);
     await this.ready;
     return this.readSingleJson<AgentInfo>(sessionId, "infos", "info_json");
   }
 
   async exists(sessionId: string): Promise<boolean> {
+    validateSessionId(sessionId);
     await this.ready;
 
     const [rows] = await this.pool.execute(`SELECT 1 FROM sessions WHERE session_id = ? LIMIT 1`, [
@@ -327,6 +335,7 @@ export class MySQLStore implements Store {
   }
 
   async delete(sessionId: string): Promise<void> {
+    validateSessionId(sessionId);
     await this.ready;
 
     await this.withTransaction(async (connection) => {

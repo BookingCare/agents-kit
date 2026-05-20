@@ -4,7 +4,7 @@ import {
   type MySQLConnection,
   type MySQLPool,
 } from "../src/persistence/providers/mysql-store.js";
-import { CorruptDataError } from "../src/persistence/errors.js";
+import { CorruptDataError, StoreError } from "../src/persistence/errors.js";
 import type { AgentInfo, StoredMessage, TodoSnapshot } from "../src/persistence/types.js";
 
 type SessionRecord = {
@@ -351,6 +351,13 @@ describe("MySQLStore", () => {
     expect(await store.exists("alpha")).toBe(false);
     expect(await store.loadInfo("alpha")).toBeUndefined();
     expect(await store.list()).toEqual(["beta", "pref-abc"]);
+  });
+
+  it("rejects invalid session IDs", async () => {
+    const tooLongSessionId = "a".repeat(192);
+
+    await expect(store.saveInfo("a/b", createAgentInfo("a/b"))).rejects.toThrow(StoreError);
+    await expect(store.exists(tooLongSessionId)).rejects.toThrow(StoreError);
   });
 
   it("throws CorruptDataError for invalid JSON", async () => {
