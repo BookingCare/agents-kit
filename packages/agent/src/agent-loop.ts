@@ -558,7 +558,7 @@ async function collectStreamIntoMessage(
       case "text_delta":
         text += event.delta;
         partial = { ...partial, content: text };
-        await emit({ type: "message_update", message: partial });
+        await emit({ type: "message_update", message: partial, assistantMessageEvent: event });
         break;
 
       case "text_end":
