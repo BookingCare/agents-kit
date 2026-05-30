@@ -246,7 +246,11 @@ export interface AgentState {
 
 export type AgentEvent =
   | { type: "message_start"; message: StreamingAssistantMessage }
-  | { type: "message_update"; message: StreamingAssistantMessage; assistantMessageEvent?: AssistantMessageEvent }
+  | {
+      type: "message_update";
+      message: StreamingAssistantMessage;
+      assistantMessageEvent?: AssistantMessageEvent;
+    }
   | { type: "message_end"; message: AgentMessage }
   | { type: "tool_execution_start"; toolCallId: string }
   | { type: "tool_execution_end"; toolCallId: string }
