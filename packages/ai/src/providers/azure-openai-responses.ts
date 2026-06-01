@@ -1,5 +1,6 @@
 import { AzureOpenAI } from "openai/azure";
 import type {
+  Response as OpenAIResponse,
   ResponseCreateParamsStreaming,
   ResponseFunctionToolCall,
   ResponseInput,
@@ -59,21 +60,23 @@ export function _resetResponsesClient(): void {
 
 function createClient(options?: AzureOpenAIResponsesOptions): AzureOpenAI {
   const config = detectAzureOpenAIConfig();
-  if (!config) {
+  const endpoint = options?.azureEndpoint ?? config?.endpoint;
+  const apiKey = options?.apiKey ?? config?.apiKey;
+
+  if (!endpoint || !apiKey) {
     throw new AIError(
-      "Azure OpenAI requires AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY environment variables.",
+      "Azure OpenAI requires azureEndpoint/apiKey options or AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY environment variables.",
       { provider: "azure-openai" },
     );
   }
 
-  const endpoint = options?.azureEndpoint || config.endpoint;
   const apiVersion = options?.azureApiVersion || DEFAULT_AZURE_RESPONSES_API_VERSION;
-  const cacheKey = `${endpoint}|${apiVersion}`;
+  const cacheKey = `${endpoint}|${apiVersion}|${apiKey}`;
   if (cachedClient && cachedClientKey === cacheKey) return cachedClient;
 
   cachedClient = new AzureOpenAI({
     endpoint,
-    apiKey: options?.apiKey || config.apiKey,
+    apiKey,
     apiVersion,
   });
   cachedClientKey = cacheKey;
@@ -89,7 +92,7 @@ function resolveDeploymentName(
 
 function convertImage(part: ImageContent): ResponseInputContent {
   const image = part.image instanceof URL ? part.image.toString() : part.image;
-  const imageUrl = image.startsWith("data:")
+  const imageUrl = /^[a-z][a-z\d+.-]*:/i.test(image)
     ? image
     : `data:${part.mimeType || "image/png"};base64,${image}`;
 
@@ -205,11 +208,14 @@ export function buildResponsesParams(
   if (options?.topP !== undefined) params.top_p = options.topP;
   if (context.tools?.length) params.tools = convertResponsesTools(context.tools);
 
-  if (model.reasoning && (options?.reasoningEffort || options?.reasoningSummary)) {
-    params.reasoning = {
-      effort: options.reasoningEffort || "medium",
-      summary: options.reasoningSummary || "auto",
-    };
+  if (
+    model.reasoning &&
+    (options?.reasoningEffort !== undefined || options?.reasoningSummary !== undefined)
+  ) {
+    const reasoning: NonNullable<ResponseCreateParamsStreaming["reasoning"]> = {};
+    if (options?.reasoningEffort !== undefined) reasoning.effort = options.reasoningEffort;
+    if (options?.reasoningSummary !== undefined) reasoning.summary = options.reasoningSummary;
+    params.reasoning = reasoning;
     params.include = ["reasoning.encrypted_content"];
   }
 
@@ -233,6 +239,31 @@ function mapStopReason(status: ResponseStatus | undefined): StopReason {
 
 function getContentIndex(blocks: AssistantMessage["content"]): number {
   return blocks.length - 1;
+}
+
+function applyTerminalResponse<TApi extends Api>(
+  response: OpenAIResponse,
+  output: AssistantMessage,
+  model: Model<TApi>,
+  fallbackStatus: ResponseStatus,
+): void {
+  output.responseId = response.id;
+  const cachedTokens = response.usage?.input_tokens_details?.cached_tokens || 0;
+  const usage: Usage = {
+    input: (response.usage?.input_tokens || 0) - cachedTokens,
+    output: response.usage?.output_tokens || 0,
+    cacheRead: cachedTokens,
+    cacheWrite: 0,
+    reasoningTokens: response.usage?.output_tokens_details?.reasoning_tokens,
+    totalTokens: response.usage?.total_tokens || 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  usage.cost = calculateCost(usage, model);
+  output.usage = usage;
+  output.stopReason = mapStopReason(response.status ?? fallbackStatus);
+  if (output.content.some((block) => isToolCall(block)) && output.stopReason === "stop") {
+    output.stopReason = "toolUse";
+  }
 }
 
 async function processResponsesStream<TApi extends Api>(
@@ -422,24 +453,12 @@ async function processResponsesStream<TApi extends Api>(
     }
 
     if (event.type === "response.completed") {
-      const response = event.response;
-      output.responseId = response.id;
-      const cachedTokens = response.usage?.input_tokens_details?.cached_tokens || 0;
-      const usage: Usage = {
-        input: (response.usage?.input_tokens || 0) - cachedTokens,
-        output: response.usage?.output_tokens || 0,
-        cacheRead: cachedTokens,
-        cacheWrite: 0,
-        reasoningTokens: response.usage?.output_tokens_details?.reasoning_tokens,
-        totalTokens: response.usage?.total_tokens || 0,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      };
-      usage.cost = calculateCost(usage, model);
-      output.usage = usage;
-      output.stopReason = mapStopReason(response.status);
-      if (output.content.some((block) => isToolCall(block)) && output.stopReason === "stop") {
-        output.stopReason = "toolUse";
-      }
+      applyTerminalResponse(event.response, output, model, "completed");
+      continue;
+    }
+
+    if (event.type === "response.incomplete") {
+      applyTerminalResponse(event.response, output, model, "incomplete");
       continue;
     }
 
