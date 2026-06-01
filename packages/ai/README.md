@@ -59,7 +59,7 @@ function stream<TApi extends Api>(
 
 - **Model** — carries API type, provider, base URL, pricing, and compat overrides. The provider is resolved from `model.api` via the API registry.
 - **Context** — content-level: `{ messages: Message[]; tools?: Tool[] }`. Separates what is being asked from how it is transported.
-- **StreamOptions** — transport-level control: `temperature`, `maxTokens`, `topP`, `stopSequences`, `signal`, `apiKey`, `transport`, `cacheRetention`, `sessionId`, `onPayload`, `onResponse`, `headers`, `timeoutMs`, `maxRetries`, `maxRetryDelayMs`, `metadata`.
+- **StreamOptions** — transport-level control: `temperature`, `maxTokens`, `topP`, `stopSequences`, `signal`, `apiKey`, `transport`, `cacheRetention`, `sessionId`, `onPayload`, `onResponse`, `headers`, `timeoutMs`, `maxRetries`, `maxRetryDelayMs`, `reasoningEffort`, `metadata`.
 
 Providers implement `StreamFunction<TApi, TOptions>` — a typed function `(model, context, options?) => AssistantMessageEventStream` that encodes all errors into the stream.
 
@@ -235,16 +235,19 @@ Configure via environment variables:
 ```bash
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
 AZURE_OPENAI_API_KEY=your-api-key
-AZURE_OPENAI_API_VERSION=2024-12-01-preview  # optional, defaults to 2024-12-01-preview
+AZURE_OPENAI_API_VERSION=2024-12-01-preview  # optional for Chat Completions
 ```
 
-The model name in `getModel()` maps to your Azure deployment name. Create deployments named `gpt-5.4-nano`, etc. to match the model registry.
+The model name in `getModel()` maps to your Azure deployment name. Create deployments named `gpt-5.4-mini`, `gpt-5.4-nano`, etc. to match the model registry.
+
+GPT-5.4 models use Azure OpenAI Responses API by default. For reasoning models, pass `reasoningEffort` to control `reasoning.effort` (`"low"`, `"medium"`, `"high"`, etc.) and `reasoningSummary: "auto"` to stream reasoning summaries as `thinking_delta` events. Raw reasoning tokens are not emitted by the API; they are counted as output tokens in usage and exposed as `usage.reasoningTokens` when the provider reports them.
 
 #### Supported Models
 
 | Model        | Context Window | Max Output | Vision | Reasoning | Price (in/out per 1M tokens) |
 | ------------ | -------------- | ---------- | ------ | --------- | ---------------------------- |
-| gpt-5.4-nano | 400,000        | 128,000    | Yes    | No        | $0.20 / $1.25                |
+| gpt-5.4-mini | 400,000        | 128,000    | Yes    | Yes       | $0.75 / $4.50                |
+| gpt-5.4-nano | 400,000        | 128,000    | Yes    | Yes       | $0.20 / $1.25                |
 
 ## Content Type Guards
 

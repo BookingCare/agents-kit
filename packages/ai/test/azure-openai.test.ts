@@ -62,6 +62,12 @@ describe("buildParams", () => {
     expect(params.stop).toEqual(["STOP"]);
   });
 
+  it("forwards reasoning effort for reasoning models", () => {
+    const params = buildParams(testModel, makeContext(), { reasoningEffort: "low" });
+
+    expect(params.reasoning_effort).toBe("low");
+  });
+
   it("sets model id from the model object", () => {
     const params = buildParams(testModel, makeContext());
 
