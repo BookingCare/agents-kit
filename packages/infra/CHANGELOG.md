@@ -2,11 +2,19 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-04
+
 ### Added
 
 - Added `createStore()` factory for JSON and MySQL persistence backends.
 - Added `MySQLStore` as a MySQL-backed `Store` implementation for session persistence.
 - Added `Store.getMetrics()` for operation, latency, and storage snapshots.
+
+### Fixed
+
+- Added store shutdown support.
+- Validated persisted session IDs before reading or writing store data.
+- Logged MySQL transaction rollback failures for easier persistence debugging.
 
 ## [0.4.1] - 2026-05-18
 

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-04
+
 ### Breaking Changes
 
 - `McpServerConfig` now only supports `stdio` and `sse` transports; removed the unused `auth` and `websocket` fields.
@@ -15,6 +17,7 @@
 - `AgentOptions.mcpServers` and `AgentOptions.mcpConfigPath` for MCP integration
 - `AgentOptions.loadMcpConfig` to auto-load MCP config from workspace
 - `createToolDispatch()` now accepts optional `mcpRegistry` parameter
+- `message_update` events now include the structured `assistantMessageEvent` payload.
 
 ### Changed
 
