@@ -14,13 +14,11 @@ import { join } from "path";
 const args = new Set(process.argv.slice(2));
 const skipBuild = args.has("--skip-build");
 const skipCheck = args.has("--skip-check");
-
 const failures = [];
 
 function run(command, commandArgs, options = {}) {
-  const printable = [command, ...commandArgs].join(" ");
   if (!options.silent) {
-    console.log(`$ ${printable}`);
+    console.log(`$ ${[command, ...commandArgs].join(" ")}`);
   }
 
   try {
@@ -48,30 +46,25 @@ function check(label, fn) {
   }
 }
 
+function getPackageJsonPaths() {
+  const packagesDir = join(process.cwd(), "packages");
+
+  return readdirSync(packagesDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(packagesDir, entry.name, "package.json"))
+    .filter((packageJsonPath) => existsSync(packageJsonPath));
+}
+
 function readPackageJson(path) {
   return JSON.parse(readFileSync(path, "utf-8"));
 }
 
 function getWorkspacePackages() {
-  const packagesDir = join(process.cwd(), "packages");
-  return readdirSync(packagesDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => {
-      const packageJsonPath = join(packagesDir, entry.name, "package.json");
-      if (!existsSync(packageJsonPath)) {
-        return null;
-      }
-      return {
-        dir: join(packagesDir, entry.name),
-        packageJsonPath,
-        packageJson: readPackageJson(packageJsonPath),
-      };
-    })
-    .filter((entry) => entry !== null);
+  return getPackageJsonPaths().map((packageJsonPath) => readPackageJson(packageJsonPath));
 }
 
 function getReleaseVersion(packages) {
-  const versions = new Set(packages.map((entry) => entry.packageJson.version));
+  const versions = new Set(packages.map((packageJson) => packageJson.version));
   if (versions.size !== 1) {
     throw new Error(`Workspace packages are not lockstep: ${[...versions].sort().join(", ")}`);
   }
@@ -86,7 +79,7 @@ function assertCommandOutputEmpty(command, commandArgs, label) {
 }
 
 const packages = getWorkspacePackages();
-const publishablePackages = packages.filter((entry) => !entry.packageJson.private);
+const publishablePackages = packages.filter((packageJson) => !packageJson.private);
 let releaseVersion;
 
 console.log("\n=== Release Preflight ===\n");
@@ -109,16 +102,19 @@ check("npm authentication is available", () => {
 });
 
 check("publishable package versions are not already on npm", () => {
-  for (const entry of publishablePackages) {
-    const packageName = entry.packageJson.name;
-    const publishedVersion = run("npm", ["view", `${packageName}@${releaseVersion}`, "version"], {
-      silent: true,
-      ignoreError: true,
-    });
+  for (const packageJson of publishablePackages) {
+    const publishedVersion = run(
+      "npm",
+      ["view", `${packageJson.name}@${releaseVersion}`, "version"],
+      {
+        silent: true,
+        ignoreError: true,
+      },
+    );
     if (publishedVersion?.trim() === releaseVersion) {
-      throw new Error(`${packageName}@${releaseVersion} is already published`);
+      throw new Error(`${packageJson.name}@${releaseVersion} is already published`);
     }
-    console.log(`not published: ${packageName}@${releaseVersion}`);
+    console.log(`not published: ${packageJson.name}@${releaseVersion}`);
   }
 });
 

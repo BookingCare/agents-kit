@@ -8,26 +8,58 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { join } from "path";
 
-const packagesDir = join(process.cwd(), "packages");
-const packageDirs = readdirSync(packagesDir, { withFileTypes: true })
-  .filter((dirent) => dirent.isDirectory())
-  .map((dirent) => ({
-    name: dirent.name,
-    packageJsonPath: join(packagesDir, dirent.name, "package.json"),
-  }))
-  .filter((entry) => existsSync(entry.packageJsonPath));
+function getPackageJsonPaths() {
+  const packagesDir = join(process.cwd(), "packages");
 
-// Read all package.json files and build version map
+  return readdirSync(packagesDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(packagesDir, entry.name, "package.json"))
+    .filter((packageJsonPath) => existsSync(packageJsonPath));
+}
+
+function readPackage(packageJsonPath) {
+  const data = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+  return { path: packageJsonPath, data };
+}
+
+function syncDependencySet(packageName, dependencies, dependencyType, versionMap) {
+  if (!dependencies) {
+    return 0;
+  }
+
+  let updates = 0;
+
+  for (const [depName, currentVersion] of Object.entries(dependencies)) {
+    const targetVersion = versionMap[depName];
+    if (!targetVersion) {
+      continue;
+    }
+
+    const newVersion = `^${targetVersion}`;
+    if (currentVersion === newVersion) {
+      continue;
+    }
+
+    const suffix = dependencyType === "devDependencies" ? " (devDependencies)" : "";
+    console.log(`\n${packageName}:`);
+    console.log(`  ${depName}: ${currentVersion} -> ${newVersion}${suffix}`);
+    dependencies[depName] = newVersion;
+    updates++;
+  }
+
+  return updates;
+}
+
 const packages = {};
 const versionMap = {};
 
-for (const dir of packageDirs) {
+for (const packageJsonPath of getPackageJsonPaths()) {
   try {
-    const pkg = JSON.parse(readFileSync(dir.packageJsonPath, "utf8"));
-    packages[dir.name] = { path: dir.packageJsonPath, data: pkg };
-    versionMap[pkg.name] = pkg.version;
-  } catch (e) {
-    console.error(`Failed to read ${dir.packageJsonPath}:`, e.message);
+    const pkg = readPackage(packageJsonPath);
+    packages[pkg.data.name] = pkg;
+    versionMap[pkg.data.name] = pkg.data.version;
+  } catch (error) {
+    console.error(`Failed to read ${packageJsonPath}:`, error.message);
   }
 }
 
@@ -36,7 +68,6 @@ for (const [name, version] of Object.entries(versionMap).sort()) {
   console.log(`  ${name}: ${version}`);
 }
 
-// Verify all versions are the same (lockstep)
 const versions = new Set(Object.values(versionMap));
 if (versions.size > 1) {
   console.error("\nERROR: Not all packages have the same version.");
@@ -49,47 +80,27 @@ if (versions.size > 1) {
 
 console.log("\nAll packages at same version (lockstep)");
 
-// Update all inter-package dependencies
 let totalUpdates = 0;
 for (const pkg of Object.values(packages)) {
-  let updated = false;
+  const dependencyUpdates = syncDependencySet(
+    pkg.data.name,
+    pkg.data.dependencies,
+    "dependencies",
+    versionMap,
+  );
+  const devDependencyUpdates = syncDependencySet(
+    pkg.data.name,
+    pkg.data.devDependencies,
+    "devDependencies",
+    versionMap,
+  );
 
-  // Check dependencies
-  if (pkg.data.dependencies) {
-    for (const [depName, currentVersion] of Object.entries(pkg.data.dependencies)) {
-      if (versionMap[depName]) {
-        const newVersion = `^${versionMap[depName]}`;
-        if (currentVersion !== newVersion) {
-          console.log(`\n${pkg.data.name}:`);
-          console.log(`  ${depName}: ${currentVersion} -> ${newVersion}`);
-          pkg.data.dependencies[depName] = newVersion;
-          updated = true;
-          totalUpdates++;
-        }
-      }
-    }
-  }
-
-  // Check devDependencies
-  if (pkg.data.devDependencies) {
-    for (const [depName, currentVersion] of Object.entries(pkg.data.devDependencies)) {
-      if (versionMap[depName]) {
-        const newVersion = `^${versionMap[depName]}`;
-        if (currentVersion !== newVersion) {
-          console.log(`\n${pkg.data.name}:`);
-          console.log(`  ${depName}: ${currentVersion} -> ${newVersion} (devDependencies)`);
-          pkg.data.devDependencies[depName] = newVersion;
-          updated = true;
-          totalUpdates++;
-        }
-      }
-    }
-  }
-
-  // Write if updated
-  if (updated) {
+  const packageUpdates = dependencyUpdates + devDependencyUpdates;
+  if (packageUpdates > 0) {
     writeFileSync(pkg.path, JSON.stringify(pkg.data, null, "\t") + "\n");
   }
+
+  totalUpdates += packageUpdates;
 }
 
 if (totalUpdates === 0) {
