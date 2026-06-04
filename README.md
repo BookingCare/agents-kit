@@ -45,7 +45,7 @@ const { messages, iterations } = await agentLoop("Create a file called notes.txt
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines, [AGENTS.md](AGENTS.md) for project-specific rules, and [docs/releasing.md](docs/releasing.md) for the maintainer release checklist.
 
 ## Development
 

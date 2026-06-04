@@ -187,15 +187,31 @@ Include message/tool conversion functions and response parsing that emits standa
 - `patch`: Bug fixes and new features
 - `minor`: API breaking changes
 
+Repository rules require release changes to reach `main` through a PR. Do not push release commits directly to `main`.
+
 ### Steps
 
-1. **Update CHANGELOGs**: Ensure all changes since last release are documented in the `[Unreleased]` section of each affected package's CHANGELOG.md
+1. **Preflight**: Run `npm whoami` and `pnpm release:preflight` before publishing. The preflight script is safe: it does not publish, push, tag, or create GitHub releases.
 
-2. **Run release script**:
+2. **Prepare release branch**: Create `release/vX.Y.Z` from `origin/main`.
+
+3. **Bump versions**:
+
    ```
    pnpm release:patch # Fixes and additions
    pnpm release:minor # API breaking changes
+   pnpm install --lockfile-only --link-workspace-packages=true
    ```
+
+4. **Update CHANGELOGs**: Move each package's `[Unreleased]` content into `## [X.Y.Z] - YYYY-MM-DD`, then add a new empty `[Unreleased]` section above it.
+
+5. **Verify and open PR**: Run `pnpm build`, `pnpm check`, and `node scripts/publish-packages.mjs --dry-run`, then open a release PR.
+
+6. **Publish after merge**: After the PR is merged, publish from the merged release commit with `node scripts/publish-packages.mjs`.
+
+7. **Create GitHub release**: Tag the release commit, push `vX.Y.Z`, then run `gh release create vX.Y.Z --title vX.Y.Z --generate-notes --verify-tag`.
+
+See `docs/releasing.md` for the full maintainer checklist.
 
 ## **CRITICAL** Git Rules for Parallell Agents **CRITICAL**
 
