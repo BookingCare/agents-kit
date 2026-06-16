@@ -1,6 +1,6 @@
 {
   "name": "@bookingcare/ai",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Unified LLM API with automatic model discovery, provider configuration, token and cost tracking, and context persistence",
   "license": "MIT",
   "type": "module",
@@ -31,7 +31,7 @@
     "generate-models": "tsx scripts/generate-models.ts"
   },
   "devDependencies": {
-    "@bookingcare/tsconfig": "^0.4.1",
+    "@bookingcare/tsconfig": "^0.5.0",
     "@types/node": "^25.6.2",
     "typescript": "^5.8.0",
     "vitest": "^4.1.5"

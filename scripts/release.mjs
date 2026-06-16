@@ -8,7 +8,7 @@
  *
  * Steps:
  * 1. Check for uncommitted changes
- * 2. Bump version via npm run version:xxx or set an explicit version
+ * 2. Bump version via pnpm release:xxx or set an explicit version
  * 3. Update CHANGELOG.md files: [Unreleased] -> [version] - date
  * 4. Commit and tag
  * 5. Publish packages to npm
@@ -27,121 +27,129 @@ const BUMP_TYPES = new Set(["major", "minor", "patch"]);
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 
 if (!RELEASE_TARGET || (!BUMP_TYPES.has(RELEASE_TARGET) && !SEMVER_RE.test(RELEASE_TARGET))) {
-	console.error("Usage: node scripts/release.mjs <major|minor|patch|x.y.z>");
-	process.exit(1);
+  console.error("Usage: node scripts/release.mjs <major|minor|patch|x.y.z>");
+  process.exit(1);
 }
 
 function run(cmd, options = {}) {
-	console.log(`$ ${cmd}`);
-	try {
-		return execSync(cmd, { encoding: "utf-8", stdio: options.silent ? "pipe" : "inherit", ...options });
-	} catch (e) {
-		if (!options.ignoreError) {
-			console.error(`Command failed: ${cmd}`);
-			process.exit(1);
-		}
-		return null;
-	}
+  console.log(`$ ${cmd}`);
+  try {
+    return execSync(cmd, {
+      encoding: "utf-8",
+      stdio: options.silent ? "pipe" : "inherit",
+      ...options,
+    });
+  } catch (e) {
+    if (!options.ignoreError) {
+      console.error(`Command failed: ${cmd}`);
+      process.exit(1);
+    }
+    return null;
+  }
 }
 
 function getVersion() {
-	const pkg = JSON.parse(readFileSync("packages/ai/package.json", "utf-8"));
-	return pkg.version;
+  const pkg = JSON.parse(readFileSync("packages/ai/package.json", "utf-8"));
+  return pkg.version;
 }
 
 function compareVersions(a, b) {
-	const aParts = a.split(".").map(Number);
-	const bParts = b.split(".").map(Number);
+  const aParts = a.split(".").map(Number);
+  const bParts = b.split(".").map(Number);
 
-	for (let i = 0; i < 3; i++) {
-		const diff = (aParts[i] || 0) - (bParts[i] || 0);
-		if (diff !== 0) {
-			return diff;
-		}
-	}
+  for (let i = 0; i < 3; i++) {
+    const diff = (aParts[i] || 0) - (bParts[i] || 0);
+    if (diff !== 0) {
+      return diff;
+    }
+  }
 
-	return 0;
+  return 0;
 }
 
 function shellQuote(value) {
-	return `'${value.replace(/'/g, `'\\''`)}'`;
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function stageChangedFiles() {
-	const output = run("git ls-files -m -o -d --exclude-standard", { silent: true });
-	const paths = [...new Set((output || "").split("\n").map((line) => line.trim()).filter(Boolean))];
-	if (paths.length === 0) {
-		return;
-	}
+  const output = run("git ls-files -m -o -d --exclude-standard", { silent: true });
+  const paths = [
+    ...new Set(
+      (output || "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (paths.length === 0) {
+    return;
+  }
 
-	run(`git add -- ${paths.map(shellQuote).join(" ")}`);
+  run(`git add -- ${paths.map(shellQuote).join(" ")}`);
 }
 
 function bumpOrSetVersion(target) {
-	const currentVersion = getVersion();
+  const currentVersion = getVersion();
 
-	if (BUMP_TYPES.has(target)) {
-		console.log(`Bumping version (${target})...`);
-		run(`pnpm run version:${target}`);
-		return getVersion();
-	}
+  if (BUMP_TYPES.has(target)) {
+    console.log(`Bumping version (${target})...`);
+    run(`pnpm release:${target}`);
+    run("pnpm install --lockfile-only --link-workspace-packages=true");
+    return getVersion();
+  }
 
-	if (compareVersions(target, currentVersion) <= 0) {
-		console.error(`Error: explicit version ${target} must be greater than current version ${currentVersion}.`);
-		process.exit(1);
-	}
+  if (compareVersions(target, currentVersion) <= 0) {
+    console.error(
+      `Error: explicit version ${target} must be greater than current version ${currentVersion}.`,
+    );
+    process.exit(1);
+  }
 
-	console.log(`Setting explicit version (${target})...`);
-	run(
-		`pnpm -r exec -- npm version ${target} --no-git-tag-version && node scripts/sync-versions.mjs && pnpm install`,
-	);
-	return getVersion();
+  console.log(`Setting explicit version (${target})...`);
+  run(
+    `pnpm -r exec -- npm version ${target} --no-git-tag-version && node scripts/sync-versions.mjs && pnpm install --lockfile-only --link-workspace-packages=true`,
+  );
+  return getVersion();
 }
 
 function getChangelogs() {
-	const packagesDir = "packages";
-	const packages = readdirSync(packagesDir);
-	return packages
-		.map((pkg) => join(packagesDir, pkg, "CHANGELOG.md"))
-		.filter((path) => existsSync(path));
+  const packagesDir = "packages";
+  const packages = readdirSync(packagesDir);
+  return packages
+    .map((pkg) => join(packagesDir, pkg, "CHANGELOG.md"))
+    .filter((path) => existsSync(path));
 }
 
 function updateChangelogsForRelease(version) {
-	const date = new Date().toISOString().split("T")[0];
-	const changelogs = getChangelogs();
+  const date = new Date().toISOString().split("T")[0];
+  const changelogs = getChangelogs();
 
-	for (const changelog of changelogs) {
-		const content = readFileSync(changelog, "utf-8");
+  for (const changelog of changelogs) {
+    const content = readFileSync(changelog, "utf-8");
 
-		if (!content.includes("## [Unreleased]")) {
-			console.log(`  Skipping ${changelog}: no [Unreleased] section`);
-			continue;
-		}
+    if (!content.includes("## [Unreleased]")) {
+      console.log(`  Skipping ${changelog}: no [Unreleased] section`);
+      continue;
+    }
 
-		const updated = content.replace(
-			"## [Unreleased]",
-			`## [${version}] - ${date}`
-		);
-		writeFileSync(changelog, updated);
-		console.log(`  Updated ${changelog}`);
-	}
+    const updated = content.replace("## [Unreleased]", `## [${version}] - ${date}`);
+    writeFileSync(changelog, updated);
+    console.log(`  Updated ${changelog}`);
+  }
 }
 
 function addUnreleasedSection() {
-	const changelogs = getChangelogs();
-	const unreleasedSection = "## [Unreleased]\n\n";
+  const changelogs = getChangelogs();
+  const unreleasedSection = "## [Unreleased]\n\n";
 
-	for (const changelog of changelogs) {
-		const content = readFileSync(changelog, "utf-8");
+  for (const changelog of changelogs) {
+    const content = readFileSync(changelog, "utf-8");
 
-		// Insert after "# Changelog\n\n"
-		const updated = content.replace(
-			/^(# Changelog\n\n)/,
-			`$1${unreleasedSection}`
-		);
-		writeFileSync(changelog, updated);
-		console.log(`  Added [Unreleased] to ${changelog}`);
-	}
+    // Insert after "# Changelog\n\n"
+    const updated = content.replace(/^(# Changelog\n\n)/, `$1${unreleasedSection}`);
+    writeFileSync(changelog, updated);
+    console.log(`  Added [Unreleased] to ${changelog}`);
+  }
 }
 
 // Main flow
@@ -151,9 +159,9 @@ console.log("\n=== Release Script ===\n");
 console.log("Checking for uncommitted changes...");
 const status = run("git status --porcelain", { silent: true });
 if (status && status.trim()) {
-	console.error("Error: Uncommitted changes detected. Commit or stash first.");
-	console.error(status);
-	process.exit(1);
+  console.error("Error: Uncommitted changes detected. Commit or stash first.");
+  console.error(status);
+  process.exit(1);
 }
 console.log("  Working directory clean\n");
 

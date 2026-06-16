@@ -10,6 +10,12 @@ A TypeScript toolkit for building AI-powered agents with streaming, tool dispatc
 | [@bookingcare/agent](packages/agent) | [![npm](https://img.shields.io/npm/v/@bookingcare/agent.svg)](https://www.npmjs.com/package/@bookingcare/agent) | Agent loop with tool dispatch, file tools, skill loading, and todo tracking    |
 | [@bookingcare/infra](packages/infra) | [![npm](https://img.shields.io/npm/v/@bookingcare/infra.svg)](https://www.npmjs.com/package/@bookingcare/infra) | Sandbox execution and persistence for process-isolated agent tools             |
 
+## Highlights
+
+- `@bookingcare/ai` provides a typed model registry, streaming assistant events, tool calling, usage, and cost tracking.
+- `@bookingcare/agent` provides the agent loop, stateful `Agent` class, event bus, permissions, todo tracking, skill loading, and MCP tools.
+- `@bookingcare/infra` provides process-isolated local sandboxing plus JSON and MySQL persistence stores.
+
 ## Quick Start
 
 ### LLM Streaming
@@ -39,7 +45,7 @@ const { messages, iterations } = await agentLoop("Create a file called notes.txt
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines, [AGENTS.md](AGENTS.md) for project-specific rules, and [docs/releasing.md](docs/releasing.md) for the maintainer release checklist.
 
 ## Development
 
