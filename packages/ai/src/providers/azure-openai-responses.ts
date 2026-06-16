@@ -2,11 +2,8 @@ import { AzureOpenAI } from "openai/azure";
 import type {
   Response as OpenAIResponse,
   ResponseCreateParamsStreaming,
-  ResponseFunctionToolCall,
   ResponseInput,
   ResponseInputContent,
-  ResponseOutputMessage,
-  ResponseReasoningItem,
   ResponseStatus,
   ResponseStreamEvent,
   Tool as OpenAIResponsesTool,
@@ -16,7 +13,6 @@ import type {
   AssistantMessage,
   Context,
   ImageContent,
-  Message,
   Model,
   SimpleStreamOptions,
   StopReason,
@@ -42,6 +38,8 @@ const DEFAULT_AZURE_RESPONSES_API_VERSION = "2025-03-01-preview";
 interface ToolCallPart extends ToolCall {
   partialArguments?: string;
 }
+
+type CurrentBlock = ThinkingContent | TextContent | ToolCallPart;
 
 export interface AzureOpenAIResponsesOptions extends StreamOptions {
   azureApiVersion?: string;
@@ -241,6 +239,40 @@ function getContentIndex(blocks: AssistantMessage["content"]): number {
   return blocks.length - 1;
 }
 
+function pushThinkingDelta(
+  block: CurrentBlock | null,
+  output: AssistantMessage,
+  stream: AssistantMessageEventStream,
+  delta: string,
+): void {
+  if (block?.type !== "thinking") return;
+
+  block.text += delta;
+  stream.push({
+    type: "thinking_delta",
+    contentIndex: getContentIndex(output.content),
+    delta,
+    partial: output,
+  });
+}
+
+function pushTextDelta(
+  block: CurrentBlock | null,
+  output: AssistantMessage,
+  stream: AssistantMessageEventStream,
+  delta: string,
+): void {
+  if (block?.type !== "text") return;
+
+  block.text += delta;
+  stream.push({
+    type: "text_delta",
+    contentIndex: getContentIndex(output.content),
+    delta,
+    partial: output,
+  });
+}
+
 function applyTerminalResponse<TApi extends Api>(
   response: OpenAIResponse,
   output: AssistantMessage,
@@ -272,9 +304,7 @@ async function processResponsesStream<TApi extends Api>(
   stream: AssistantMessageEventStream,
   model: Model<TApi>,
 ): Promise<void> {
-  let currentItem: ResponseReasoningItem | ResponseOutputMessage | ResponseFunctionToolCall | null =
-    null;
-  let currentBlock: ThinkingContent | TextContent | ToolCallPart | null = null;
+  let currentBlock: CurrentBlock | null = null;
 
   for await (const event of responseStream) {
     if (event.type === "response.created") {
@@ -285,7 +315,6 @@ async function processResponsesStream<TApi extends Api>(
     if (event.type === "response.output_item.added") {
       const item = event.item;
       if (item.type === "reasoning") {
-        currentItem = item;
         currentBlock = { type: "thinking", text: "" };
         output.content.push(currentBlock);
         stream.push({
@@ -294,7 +323,6 @@ async function processResponsesStream<TApi extends Api>(
           partial: output,
         });
       } else if (item.type === "message") {
-        currentItem = item;
         currentBlock = { type: "text", text: "" };
         output.content.push(currentBlock);
         stream.push({
@@ -303,7 +331,6 @@ async function processResponsesStream<TApi extends Api>(
           partial: output,
         });
       } else if (item.type === "function_call") {
-        currentItem = item;
         currentBlock = {
           type: "toolCall",
           id: `${item.call_id}|${item.id || item.call_id}`,
@@ -321,73 +348,26 @@ async function processResponsesStream<TApi extends Api>(
       continue;
     }
 
-    if (event.type === "response.reasoning_summary_text.delta") {
-      if (currentItem?.type === "reasoning" && currentBlock?.type === "thinking") {
-        currentBlock.text += event.delta;
-        stream.push({
-          type: "thinking_delta",
-          contentIndex: getContentIndex(output.content),
-          delta: event.delta,
-          partial: output,
-        });
-      }
+    if (
+      event.type === "response.reasoning_summary_text.delta" ||
+      event.type === "response.reasoning_text.delta"
+    ) {
+      pushThinkingDelta(currentBlock, output, stream, event.delta);
       continue;
     }
 
     if (event.type === "response.reasoning_summary_part.done") {
-      if (currentItem?.type === "reasoning" && currentBlock?.type === "thinking") {
-        currentBlock.text += "\n\n";
-        stream.push({
-          type: "thinking_delta",
-          contentIndex: getContentIndex(output.content),
-          delta: "\n\n",
-          partial: output,
-        });
-      }
+      pushThinkingDelta(currentBlock, output, stream, "\n\n");
       continue;
     }
 
-    if (event.type === "response.reasoning_text.delta") {
-      if (currentItem?.type === "reasoning" && currentBlock?.type === "thinking") {
-        currentBlock.text += event.delta;
-        stream.push({
-          type: "thinking_delta",
-          contentIndex: getContentIndex(output.content),
-          delta: event.delta,
-          partial: output,
-        });
-      }
-      continue;
-    }
-
-    if (event.type === "response.output_text.delta") {
-      if (currentItem?.type === "message" && currentBlock?.type === "text") {
-        currentBlock.text += event.delta;
-        stream.push({
-          type: "text_delta",
-          contentIndex: getContentIndex(output.content),
-          delta: event.delta,
-          partial: output,
-        });
-      }
-      continue;
-    }
-
-    if (event.type === "response.refusal.delta") {
-      if (currentItem?.type === "message" && currentBlock?.type === "text") {
-        currentBlock.text += event.delta;
-        stream.push({
-          type: "text_delta",
-          contentIndex: getContentIndex(output.content),
-          delta: event.delta,
-          partial: output,
-        });
-      }
+    if (event.type === "response.output_text.delta" || event.type === "response.refusal.delta") {
+      pushTextDelta(currentBlock, output, stream, event.delta);
       continue;
     }
 
     if (event.type === "response.function_call_arguments.delta") {
-      if (currentItem?.type === "function_call" && currentBlock?.type === "toolCall") {
+      if (currentBlock?.type === "toolCall") {
         currentBlock.partialArguments = `${currentBlock.partialArguments || ""}${event.delta}`;
         currentBlock.arguments = parseStreamingJson(currentBlock.partialArguments);
         stream.push({
@@ -401,7 +381,7 @@ async function processResponsesStream<TApi extends Api>(
     }
 
     if (event.type === "response.function_call_arguments.done") {
-      if (currentItem?.type === "function_call" && currentBlock?.type === "toolCall") {
+      if (currentBlock?.type === "toolCall") {
         currentBlock.partialArguments = event.arguments;
         currentBlock.arguments = parseStreamingJson(event.arguments || "{}");
       }
