@@ -7,6 +7,7 @@ const callToolMock = vi.fn();
 const clientCtorMock = vi.fn();
 const transportCtorMock = vi.fn();
 const stdioTransportCtorMock = vi.fn();
+const httpTransportCtorMock = vi.fn();
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
   Client: class {
@@ -37,6 +38,14 @@ vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
   },
 }));
 
+vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
+  StreamableHTTPClientTransport: class {
+    constructor(...args: unknown[]) {
+      httpTransportCtorMock(...args);
+    }
+  },
+}));
+
 import { createMcpClient, type McpServerConfig } from "../../src/mcp/client.js";
 
 describe("createMcpClient", () => {
@@ -54,6 +63,7 @@ describe("createMcpClient", () => {
     clientCtorMock.mockReset();
     transportCtorMock.mockReset();
     stdioTransportCtorMock.mockReset();
+    httpTransportCtorMock.mockReset();
   });
 
   afterEach(() => {
@@ -78,7 +88,7 @@ describe("createMcpClient", () => {
 
     expect(transportCtorMock).toHaveBeenCalledWith(new URL("http://example.com/sse"));
     expect(clientCtorMock).toHaveBeenCalledWith(
-      { name: "test-server", version: "0.4.1" },
+      { name: "test-server", version: "0.5.0" },
       { capabilities: {} },
     );
     expect(connectMock).toHaveBeenCalledTimes(1);
@@ -117,9 +127,62 @@ describe("createMcpClient", () => {
       args: ["server.js"],
     });
     expect(clientCtorMock).toHaveBeenCalledWith(
-      { name: "stdio-server", version: "0.4.1" },
+      { name: "stdio-server", version: "0.5.0" },
       { capabilities: {} },
     );
+  });
+
+  it("creates a Streamable HTTP transport with request headers", async () => {
+    const httpConfig: McpServerConfig = {
+      name: "http-server",
+      transport: "http",
+      connection: {
+        type: "http",
+        url: "https://mcp.example.com/mcp",
+        headers: {
+          authorization: "Bearer token",
+          "cf-access-client-id": "client-id",
+        },
+      },
+    };
+
+    listToolsMock.mockResolvedValue({
+      tools: [{ name: "lookup", description: "Lookup", inputSchema: { type: "object" } }],
+    });
+    callToolMock.mockResolvedValue({
+      content: [{ type: "text", text: "result" }],
+    });
+
+    const client = createMcpClient(httpConfig);
+    await client.connect();
+
+    await expect(client.listTools()).resolves.toEqual([
+      { name: "lookup", description: "Lookup", inputSchema: { type: "object" } },
+    ]);
+    await expect(client.callTool("lookup", { query: "hello" })).resolves.toBe("result");
+
+    expect(httpTransportCtorMock).toHaveBeenCalledWith(new URL("https://mcp.example.com/mcp"), {
+      requestInit: {
+        headers: {
+          authorization: "Bearer token",
+          "cf-access-client-id": "client-id",
+        },
+      },
+    });
+    expect(connectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces Streamable HTTP initialization failures", async () => {
+    const httpConfig: McpServerConfig = {
+      name: "http-server",
+      transport: "http",
+      connection: { type: "http", url: "https://mcp.example.com/mcp" },
+    };
+    const error = new Error("HTTP 500 during MCP initialization");
+    connectMock.mockRejectedValue(error);
+
+    const client = createMcpClient(httpConfig);
+    await expect(client.connect()).rejects.toThrow("HTTP 500 during MCP initialization");
   });
 
   it("throws on mismatched transports and connection types", () => {
@@ -128,10 +191,34 @@ describe("createMcpClient", () => {
         ...config,
         transport: "sse",
         connection: { type: "stdio", command: "node" },
-      } as McpServerConfig),
+      } as unknown as McpServerConfig),
     ).toThrow(
       'MCP transport/connection mismatch: transport "sse" does not match connection.type "stdio"',
     );
+  });
+
+  it("throws on invalid HTTP connection urls", () => {
+    expect(() =>
+      createMcpClient({
+        name: "http-server",
+        transport: "http",
+        connection: { type: "http", url: "" },
+      }),
+    ).toThrow("MCP HTTP connection requires a url");
+  });
+
+  it("throws on invalid HTTP headers", () => {
+    expect(() =>
+      createMcpClient({
+        name: "http-server",
+        transport: "http",
+        connection: {
+          type: "http",
+          url: "https://mcp.example.com/mcp",
+          headers: { authorization: 123 },
+        },
+      } as unknown as McpServerConfig),
+    ).toThrow('MCP HTTP connection header "authorization" must be a string');
   });
 
   it("throws on unsupported transports", () => {

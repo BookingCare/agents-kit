@@ -81,6 +81,8 @@ try {
 
 ### Configuration File (`.mcp.json`)
 
+Array-style configuration:
+
 ```json
 {
   "servers": [
@@ -97,6 +99,22 @@ try {
 }
 ```
 
+Remote MCP object-style configuration:
+
+```json
+{
+  "mcpServers": {
+    "dentaltrip-kb": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "authorization": "Bearer ${MCP_AUTH_TOKEN}"
+      }
+    }
+  }
+}
+```
+
 ```typescript
 import { Agent } from "@bookingcare/agent";
 import { getModel } from "@bookingcare/ai";
@@ -109,10 +127,32 @@ const agent = new Agent({
 
 ### Supported Transports
 
+- `http` — Streamable HTTP for remote MCP servers
 - `sse` — Server-Sent Events
 - `stdio` — Standard input/output for local MCP servers
 
 WebSocket transport is not supported.
+
+Streamable HTTP servers can include per-server request headers for service-to-service auth:
+
+```typescript
+const agent = new Agent({
+  model,
+  mcpServers: [
+    {
+      name: "dentaltrip-kb",
+      transport: "http",
+      connection: {
+        type: "http",
+        url: "https://mcp.example.com/mcp",
+        headers: {
+          authorization: `Bearer ${process.env.MCP_AUTH_TOKEN}`,
+        },
+      },
+    },
+  ],
+});
+```
 
 ### Tool Naming
 
@@ -172,8 +212,11 @@ Configuration for one MCP server connection.
 ```typescript
 interface McpServerConfig {
   name: string;
-  transport: "sse" | "stdio";
-  connection: { type: "sse"; url: string } | { type: "stdio"; command: string; args?: string[] };
+  transport: "http" | "sse" | "stdio";
+  connection:
+    | { type: "http"; url: string; headers?: Record<string, string> }
+    | { type: "sse"; url: string }
+    | { type: "stdio"; command: string; args?: string[] };
 }
 ```
 
@@ -488,7 +531,7 @@ await store.close();
 
 ## MCP Transport Support
 
-The MCP client currently supports `stdio` and `sse` transports. WebSocket transport is intentionally disabled until `@modelcontextprotocol/sdk` exports `WebSocketClientTransport`.
+The MCP client currently supports `stdio`, `sse`, and Streamable HTTP (`http`) transports. WebSocket transport is intentionally disabled until `@modelcontextprotocol/sdk` exports `WebSocketClientTransport`.
 
 ## Architecture
 

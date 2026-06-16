@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added MCP Streamable HTTP transport support with per-server request headers.
+
 ## [0.5.0] - 2026-06-04
 
 ### Breaking Changes
