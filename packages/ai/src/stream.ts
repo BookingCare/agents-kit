@@ -61,6 +61,7 @@ function copyUsage(target: Usage, source: Usage): void {
   target.output = source.output;
   target.cacheRead = source.cacheRead;
   target.cacheWrite = source.cacheWrite;
+  target.reasoningTokens = source.reasoningTokens;
   target.totalTokens = source.totalTokens;
   target.cost = { ...source.cost };
 }

@@ -171,6 +171,7 @@ export function buildParams(model: Model<Api>, context: Context, options?: Strea
     ...(options?.maxTokens !== undefined && { max_completion_tokens: options.maxTokens }),
     ...(options?.topP !== undefined && { top_p: options.topP }),
     ...(options?.stopSequences?.length && { stop: options.stopSequences }),
+    ...(options?.reasoningEffort !== undefined && { reasoning_effort: options.reasoningEffort }),
   };
 }
 
@@ -320,6 +321,9 @@ export const streamAzureOpenAICompletions: StreamFunction<
           usage.output += chunk.usage.completion_tokens ?? 0;
           if (chunk.usage.prompt_tokens_details?.cached_tokens != null) {
             usage.cacheRead += chunk.usage.prompt_tokens_details.cached_tokens;
+          }
+          if (chunk.usage.completion_tokens_details?.reasoning_tokens != null) {
+            usage.reasoningTokens = chunk.usage.completion_tokens_details.reasoning_tokens;
           }
           // Azure OpenAI doesn't provide cache_write_tokens, assume 0 for now
           // Use total_tokens from API to avoid double-counting cached tokens

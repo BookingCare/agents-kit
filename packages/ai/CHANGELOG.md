@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `gpt-5.4-mini` and reasoning-enabled `gpt-5.4-nano` to the Azure OpenAI model registry, backed by the Responses API with `reasoningEffort`, reasoning summary streaming, and reasoning token usage ([#40](https://github.com/BookingCare/agents-kit/issues/40)).
+
 ## [0.5.0] - 2026-06-04
 
 ## [0.4.1] - 2026-05-18

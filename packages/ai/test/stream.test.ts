@@ -342,6 +342,26 @@ describe("Model Registry", () => {
     expect(model!.name).toBe("GPT-5.4 Nano");
   });
 
+  it("marks GPT-5.4 models as reasoning capable", () => {
+    const nano = getModel("gpt-5.4-nano");
+    const mini = getModel("gpt-5.4-mini");
+
+    expect(nano?.reasoning).toBe(true);
+    expect(nano?.thinkingLevelMap).toEqual({
+      none: null,
+      short: 40000,
+      medium: 80000,
+      long: 100000,
+    });
+    expect(mini?.reasoning).toBe(true);
+    expect(mini?.thinkingLevelMap).toEqual({
+      none: null,
+      short: 40000,
+      medium: 80000,
+      long: 100000,
+    });
+  });
+
   it("returns undefined for unknown model", () => {
     expect(getModel("nonexistent")).toBeUndefined();
   });
@@ -390,10 +410,11 @@ describe("Cost Calculation", () => {
 });
 
 describe("API Registry", () => {
-  it("has azure-openai-completions API registered", () => {
+  it("has Azure OpenAI APIs registered", () => {
     const providers = getApiProviders();
     const apis = providers.map((p) => p.api);
     expect(apis).toContain("azure-openai-completions");
+    expect(apis).toContain("azure-openai-responses");
   });
 });
 
@@ -463,6 +484,24 @@ describe.skipIf(!auth)("Azure OpenAI Provider (gpt-5.4-nano)", () => {
 
   it("should handle streaming", { retry: 3 }, async () => {
     await handleStreaming(model());
+  });
+
+  it("should report reasoning tokens when reasoning effort is set", { retry: 3 }, async () => {
+    const s = stream(
+      model(),
+      {
+        messages: [userMsg("Solve this internally, then answer only the final integer: 19 * 23")],
+      },
+      { maxTokens: 256, reasoningEffort: "low" },
+    );
+    const response = await s.result();
+
+    expect(response.errorMessage).toBeFalsy();
+    expect(response.content.map((b) => (b.type === "text" ? b.text : "")).join("")).toContain(
+      "437",
+    );
+    expect(response.usage.reasoningTokens).toBeGreaterThan(0);
+    expect(response.usage.output).toBeGreaterThanOrEqual(response.usage.reasoningTokens ?? 0);
   });
 
   it("should handle image input", { retry: 3 }, async () => {

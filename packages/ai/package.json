@@ -14,6 +14,10 @@
     "./azure-openai": {
       "types": "./dist/providers/azure-openai.d.ts",
       "default": "./dist/providers/azure-openai.js"
+    },
+    "./azure-openai-responses": {
+      "types": "./dist/providers/azure-openai-responses.d.ts",
+      "default": "./dist/providers/azure-openai-responses.js"
     }
   },
   "files": [
