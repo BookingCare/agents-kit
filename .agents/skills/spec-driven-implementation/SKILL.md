@@ -57,10 +57,10 @@ Use the `write-product-spec` skill to produce it. The product spec should define
 
 If the feature has UI or interaction design, ask for a Figma mock if one exists. If there is no mock, continue but call that out explicitly in the product spec.
 
-**Formatting check:** Before committing specs, run prettier on the spec files to avoid pre-commit failures:
+**Formatting check:** Before committing specs, keep Markdown prose manually readable and run the repository check:
 
 ```bash
-npx prettier --write specs/**/*.md
+pnpm check
 ```
 
 Check the repository's `specs/README.md` for file naming conventions (typically lowercase `product.md` and `tech.md`).
