@@ -56,22 +56,26 @@ class SdkMcpClient implements McpClient {
     | StreamableHTTPClientTransport;
 
   constructor(config: McpServerConfig) {
-    if (config.transport === "stdio") {
-      const { command, args = [] } = config.connection;
-      this.transport = new StdioClientTransport({
-        command,
-        args,
-      });
-    } else if (config.transport === "sse") {
-      this.transport = new SSEClientTransport(createTransportUrl(config.connection.url, "SSE"));
-    } else if (config.transport === "http") {
-      const { headers, url } = config.connection;
-      this.transport = new StreamableHTTPClientTransport(createTransportUrl(url, "HTTP"), {
-        requestInit: headers ? { headers: validateHttpHeaders(headers) } : undefined,
-      });
-    } else {
-      const unsupportedConfig = config as { transport: string };
-      throw new Error(`Unsupported MCP transport: ${unsupportedConfig.transport}`);
+    switch (config.transport) {
+      case "stdio": {
+        const { command, args = [] } = config.connection;
+        this.transport = new StdioClientTransport({ command, args });
+        break;
+      }
+      case "sse":
+        this.transport = new SSEClientTransport(createTransportUrl(config.connection.url, "SSE"));
+        break;
+      case "http": {
+        const { headers, url } = config.connection;
+        this.transport = new StreamableHTTPClientTransport(createTransportUrl(url, "HTTP"), {
+          requestInit: headers ? { headers: validateHttpHeaders(headers) } : undefined,
+        });
+        break;
+      }
+      default: {
+        const unsupportedConfig = config as { transport: string };
+        throw new Error(`Unsupported MCP transport: ${unsupportedConfig.transport}`);
+      }
     }
 
     this.client = new Client(

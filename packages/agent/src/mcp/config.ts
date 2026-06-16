@@ -2,6 +2,8 @@ import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { McpServerConfig } from "./registry.js";
 
+type McpTransport = McpServerConfig["transport"];
+
 export interface McpConfig {
   servers: McpServerConfig[];
 }
@@ -86,41 +88,7 @@ function parseMcpServers(value: unknown): McpServerConfig[] {
 function parseObjectStyleServer(name: string, value: unknown): McpServerConfig {
   const server = requireObject(value, `mcpServers.${name}`);
   const transport = parseTransport(server.type, `mcpServers.${name}.type`);
-
-  if (transport === "stdio") {
-    const command = requireString(server.command, `mcpServers.${name}.command`);
-    const args = parseOptionalStringArray(server.args, `mcpServers.${name}.args`);
-
-    return {
-      name,
-      transport,
-      connection:
-        args === undefined ? { type: transport, command } : { type: transport, command, args },
-    };
-  }
-
-  if (transport === "sse") {
-    return {
-      name,
-      transport,
-      connection: {
-        type: transport,
-        url: requireString(server.url, `mcpServers.${name}.url`),
-      },
-    };
-  }
-
-  const headers = parseOptionalHeaders(server.headers, `mcpServers.${name}.headers`);
-
-  return {
-    name,
-    transport,
-    connection: {
-      type: transport,
-      url: requireString(server.url, `mcpServers.${name}.url`),
-      ...(headers === undefined ? {} : { headers }),
-    },
-  };
+  return parseServerConnection(name, transport, server, `mcpServers.${name}`);
 }
 
 function parseServerConfig(value: unknown, context: string): McpServerConfig {
@@ -136,9 +104,18 @@ function parseServerConfig(value: unknown, context: string): McpServerConfig {
     );
   }
 
+  return parseServerConnection(name, transport, connection, `${context}.connection`);
+}
+
+function parseServerConnection(
+  name: string,
+  transport: McpTransport,
+  connection: Record<string, unknown>,
+  context: string,
+): McpServerConfig {
   if (transport === "stdio") {
-    const command = requireString(connection.command, `${context}.connection.command`);
-    const args = parseOptionalStringArray(connection.args, `${context}.connection.args`);
+    const command = requireString(connection.command, `${context}.command`);
+    const args = parseOptionalStringArray(connection.args, `${context}.args`);
 
     return {
       name,
@@ -154,19 +131,19 @@ function parseServerConfig(value: unknown, context: string): McpServerConfig {
       transport,
       connection: {
         type: transport,
-        url: requireString(connection.url, `${context}.connection.url`),
+        url: requireString(connection.url, `${context}.url`),
       },
     };
   }
 
-  const headers = parseOptionalHeaders(connection.headers, `${context}.connection.headers`);
+  const headers = parseOptionalHeaders(connection.headers, `${context}.headers`);
 
   return {
     name,
     transport,
     connection: {
       type: transport,
-      url: requireString(connection.url, `${context}.connection.url`),
+      url: requireString(connection.url, `${context}.url`),
       ...(headers === undefined ? {} : { headers }),
     },
   };
@@ -188,7 +165,7 @@ function requireString(value: unknown, context: string): string {
   return value;
 }
 
-function parseTransport(value: unknown, context: string): "stdio" | "sse" | "http" {
+function parseTransport(value: unknown, context: string): McpTransport {
   if (value !== "stdio" && value !== "sse" && value !== "http") {
     throw new Error(`Invalid MCP config: ${context} must be one of stdio, sse, http`);
   }
