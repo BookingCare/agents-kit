@@ -124,13 +124,11 @@ The top-level `body` must include:
 
 ## Formatting Reminder
 
-Before validating JSON, ensure markdown spec files are formatted:
+Before validating JSON, keep changed spec prose manually readable. This repository uses Biome for automated checks, and the pre-commit hook runs:
 
-- If spec files were modified or created during review, run:
-  ```
-  npx prettier --write specs/**/*.md
-  ```
-- This prevents pre-commit hook failures when committing the updated spec files.
+```
+pnpm check
+```
 
 ## Final Checks
 
