@@ -1,6 +1,6 @@
 {
   "name": "@bookingcare/agent",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "General-purpose agent with transport abstraction, state management, and attachment support",
   "license": "MIT",
   "type": "module",
@@ -22,14 +22,14 @@
     "type-check": "tsc --noEmit"
   },
   "devDependencies": {
-    "@bookingcare/tsconfig": "^0.5.1",
+    "@bookingcare/tsconfig": "^0.5.2",
     "@types/node": "^25.6.2",
     "typescript": "^5.8.0",
     "vitest": "^4.1.5"
   },
   "dependencies": {
-    "@bookingcare/ai": "^0.5.1",
-    "@bookingcare/infra": "^0.5.1",
+    "@bookingcare/ai": "^0.5.2",
+    "@bookingcare/infra": "^0.5.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@sinclair/typebox": "^0.34.49"
   }
