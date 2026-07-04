@@ -238,7 +238,7 @@ AZURE_OPENAI_API_KEY=your-api-key
 AZURE_OPENAI_API_VERSION=2024-12-01-preview  # optional for Chat Completions
 ```
 
-The model name in `getModel()` maps to your Azure deployment name. Create deployments named `gpt-5.4-mini`, `gpt-5.4-nano`, etc. to match the model registry.
+The model name in `getModel()` maps to your Azure deployment name. Create deployments named `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, etc. to match the model registry.
 
 GPT-5.4 models use Azure OpenAI Responses API by default. For reasoning models, pass `reasoningEffort` to control `reasoning.effort` (`"low"`, `"medium"`, `"high"`, etc.) and `reasoningSummary: "auto"` to stream reasoning summaries as `thinking_delta` events. Raw reasoning tokens are not emitted by the API; they are counted as output tokens in usage and exposed as `usage.reasoningTokens` when the provider reports them.
 
@@ -246,8 +246,11 @@ GPT-5.4 models use Azure OpenAI Responses API by default. For reasoning models, 
 
 | Model        | Context Window | Max Output | Vision | Reasoning | Price (in/out per 1M tokens) |
 | ------------ | -------------- | ---------- | ------ | --------- | ---------------------------- |
+| gpt-5.4      | 1,050,000      | 128,000    | Yes    | Yes       | $2.50 / $15.00               |
 | gpt-5.4-mini | 400,000        | 128,000    | Yes    | Yes       | $0.75 / $4.50                |
 | gpt-5.4-nano | 400,000        | 128,000    | Yes    | Yes       | $0.20 / $1.25                |
+
+`gpt-5.4` pricing uses Azure's standard Global rate for prompts under 272k input tokens; Azure applies higher long-context rates above that threshold.
 
 ## Content Type Guards
 
