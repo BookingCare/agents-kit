@@ -10,6 +10,7 @@ import { calculateCost } from "../src/utils/costs.js";
 import { getApiProviders } from "../src/api-registry.js";
 import type {
   Model,
+  Api,
   Usage,
   Tool,
   StreamOptions,
@@ -18,14 +19,26 @@ import type {
   ToolResultMessage,
 } from "../src/types.js";
 import { Type } from "@sinclair/typebox";
-import { applyAuth } from "./helpers/auth.js";
+import { applyAuth, resolveAzureDeploymentName } from "./helpers/auth.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const auth = applyAuth();
-
 type StreamOptionsWithExtras = StreamOptions & Record<string, unknown>;
+
+const auth = applyAuth();
+const azureOpenAIE2EModelId = process.env["AZURE_OPENAI_E2E_MODEL"] || "gpt-5.4";
+const azureOpenAIE2EDeploymentName = resolveAzureDeploymentName(azureOpenAIE2EModelId);
+const azureOpenAIE2EOptions: StreamOptionsWithExtras = azureOpenAIE2EDeploymentName
+  ? { azureDeploymentName: azureOpenAIE2EDeploymentName }
+  : {};
+
+function getAzureOpenAIE2EModel(): Model<Api> {
+  const model = getModel(azureOpenAIE2EModelId);
+  if (!model) throw new Error(`Unknown Azure OpenAI E2E model: ${azureOpenAIE2EModelId}`);
+
+  return model;
+}
 
 function userMsg(content: string) {
   return { role: "user" as const, content, timestamp: Date.now() };
@@ -337,29 +350,24 @@ describe("Model Registry", () => {
   });
 
   it("looks up a model by id", () => {
-    const model = getModel("gpt-5.4-nano");
+    const model = getModel("gpt-5.4");
     expect(model).toBeDefined();
-    expect(model!.name).toBe("GPT-5.4 Nano");
+    expect(model!.name).toBe("GPT-5.4");
+    expect(model!.api).toBe("azure-openai-responses");
   });
 
   it("marks GPT-5.4 models as reasoning capable", () => {
-    const nano = getModel("gpt-5.4-nano");
-    const mini = getModel("gpt-5.4-mini");
+    for (const modelId of ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]) {
+      const model = getModel(modelId);
 
-    expect(nano?.reasoning).toBe(true);
-    expect(nano?.thinkingLevelMap).toEqual({
-      none: null,
-      short: 40000,
-      medium: 80000,
-      long: 100000,
-    });
-    expect(mini?.reasoning).toBe(true);
-    expect(mini?.thinkingLevelMap).toEqual({
-      none: null,
-      short: 40000,
-      medium: 80000,
-      long: 100000,
-    });
+      expect(model?.reasoning).toBe(true);
+      expect(model?.thinkingLevelMap).toEqual({
+        none: null,
+        short: 40000,
+        medium: 80000,
+        long: 100000,
+      });
+    }
   });
 
   it("returns undefined for unknown model", () => {
@@ -471,19 +479,19 @@ describe("Conversation", () => {
 
 // === E2E tests (real API calls) ===
 
-describe.skipIf(!auth)("Azure OpenAI Provider (gpt-5.4-nano)", () => {
-  const model = () => getModel("gpt-5.4-nano")!;
+describe.skipIf(!auth)(`Azure OpenAI Provider (${azureOpenAIE2EModelId})`, () => {
+  const model = getAzureOpenAIE2EModel;
 
   it("should complete basic text generation", { retry: 3 }, async () => {
-    await basicTextGeneration(model());
+    await basicTextGeneration(model(), azureOpenAIE2EOptions);
   });
 
   it("should handle tool calling", { retry: 3 }, async () => {
-    await handleToolCall(model());
+    await handleToolCall(model(), azureOpenAIE2EOptions);
   });
 
   it("should handle streaming", { retry: 3 }, async () => {
-    await handleStreaming(model());
+    await handleStreaming(model(), azureOpenAIE2EOptions);
   });
 
   it("should report reasoning tokens when reasoning effort is set", { retry: 3 }, async () => {
@@ -492,7 +500,7 @@ describe.skipIf(!auth)("Azure OpenAI Provider (gpt-5.4-nano)", () => {
       {
         messages: [userMsg("Solve this internally, then answer only the final integer: 19 * 23")],
       },
-      { maxTokens: 256, reasoningEffort: "low" },
+      { ...azureOpenAIE2EOptions, maxTokens: 256, reasoningEffort: "low" },
     );
     const response = await s.result();
 
@@ -505,24 +513,28 @@ describe.skipIf(!auth)("Azure OpenAI Provider (gpt-5.4-nano)", () => {
   });
 
   it("should handle image input", { retry: 3 }, async () => {
-    await handleImage(model());
+    await handleImage(model(), azureOpenAIE2EOptions);
   });
 
   it("should handle multi-turn with tools", { retry: 3 }, async () => {
-    await multiTurn(model());
+    await multiTurn(model(), azureOpenAIE2EOptions);
   });
 });
 
 describe.skipIf(!auth)("streamSimple API", () => {
-  const model = () => getModel("gpt-5.4-nano")!;
+  const model = getAzureOpenAIE2EModel;
 
   it("should send prompt with system message", { retry: 3 }, async () => {
-    const eventStream = streamSimple(model(), {
-      messages: [
-        { role: "system", content: "Reply with exactly the word 'pong'." },
-        userMsg("ping"),
-      ],
-    });
+    const eventStream = streamSimple(
+      model(),
+      {
+        messages: [
+          { role: "system", content: "Reply with exactly the word 'pong'." },
+          userMsg("ping"),
+        ],
+      },
+      azureOpenAIE2EOptions,
+    );
     const result = await collectStream(eventStream, model());
 
     expect(result.text.toLowerCase().trim()).toBe("pong");
@@ -531,12 +543,16 @@ describe.skipIf(!auth)("streamSimple API", () => {
 });
 
 describe.skipIf(!auth)("complete API", () => {
-  const model = () => getModel("gpt-5.4-nano")!;
+  const model = getAzureOpenAIE2EModel;
 
   it("should return text completion", { retry: 3 }, async () => {
-    const result = await complete(model(), {
-      messages: [userMsg("What is 2+2? Reply with just the number.")],
-    });
+    const result = await complete(
+      model(),
+      {
+        messages: [userMsg("What is 2+2? Reply with just the number.")],
+      },
+      azureOpenAIE2EOptions,
+    );
 
     expect(result.text).toContain("4");
     expect(result.usage.input).toBeGreaterThan(0);
@@ -546,9 +562,13 @@ describe.skipIf(!auth)("complete API", () => {
   });
 
   it("should return cost from model pricing", { retry: 3 }, async () => {
-    const result = await complete(model(), {
-      messages: [userMsg("Say hello.")],
-    });
+    const result = await complete(
+      model(),
+      {
+        messages: [userMsg("Say hello.")],
+      },
+      azureOpenAIE2EOptions,
+    );
 
     expect(result.usage.cost.input).toBeGreaterThan(0);
     expect(result.usage.cost.output).toBeGreaterThan(0);
@@ -557,15 +577,19 @@ describe.skipIf(!auth)("complete API", () => {
 });
 
 describe.skipIf(!auth)("completeSimple API", () => {
-  const model = () => getModel("gpt-5.4-nano")!;
+  const model = getAzureOpenAIE2EModel;
 
   it("should return text result with system message", { retry: 3 }, async () => {
-    const result = await completeSimple(model(), {
-      messages: [
-        { role: "system", content: "Reply with exactly the word 'pong'." },
-        userMsg("ping"),
-      ],
-    });
+    const result = await completeSimple(
+      model(),
+      {
+        messages: [
+          { role: "system", content: "Reply with exactly the word 'pong'." },
+          userMsg("ping"),
+        ],
+      },
+      azureOpenAIE2EOptions,
+    );
 
     expect(result.text.toLowerCase().trim()).toBe("pong");
     expect(result.usage.input).toBeGreaterThan(0);

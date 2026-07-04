@@ -7,6 +7,24 @@ export interface AuthConfig {
   AZURE_OPENAI_ENDPOINT: string;
   AZURE_OPENAI_API_KEY: string;
   AZURE_OPENAI_API_VERSION?: string;
+  AZURE_OPENAI_DEPLOYMENT_NAME_MAP?: string;
+}
+
+function parseDeploymentNameMap(value: string | undefined): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!value) return map;
+
+  for (const entry of value.split(",")) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+
+    const [modelId, deploymentName] = trimmed.split("=", 2);
+    if (!modelId || !deploymentName) continue;
+
+    map.set(modelId.trim(), deploymentName.trim());
+  }
+
+  return map;
 }
 
 /**
@@ -39,6 +57,13 @@ export function applyAuth(): AuthConfig | undefined {
   if (auth.AZURE_OPENAI_API_VERSION) {
     process.env.AZURE_OPENAI_API_VERSION = auth.AZURE_OPENAI_API_VERSION;
   }
+  if (auth.AZURE_OPENAI_DEPLOYMENT_NAME_MAP) {
+    process.env.AZURE_OPENAI_DEPLOYMENT_NAME_MAP = auth.AZURE_OPENAI_DEPLOYMENT_NAME_MAP;
+  }
 
   return auth;
+}
+
+export function resolveAzureDeploymentName(modelId: string): string | undefined {
+  return parseDeploymentNameMap(process.env["AZURE_OPENAI_DEPLOYMENT_NAME_MAP"]).get(modelId);
 }

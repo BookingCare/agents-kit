@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-04
+
+### Added
+
+- Added `gpt-5.4` to the Azure OpenAI model registry, backed by the Responses API.
+
 ## [0.5.1] - 2026-06-16
 
 ### Added

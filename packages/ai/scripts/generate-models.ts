@@ -1,4 +1,4 @@
-import type { Model, Api } from "../src/types.js";
+import type { Model, Api, ThinkingLevelMap } from "../src/types.js";
 import { models as currentModels } from "../src/models.generated.js";
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -101,6 +101,29 @@ const azureOpenAIModels: Model<Api>[] = [
     },
     contextWindow: 1_047_576,
     maxTokens: 32_768,
+  },
+  {
+    id: "gpt-5.4",
+    name: "GPT-5.4",
+    api: "azure-openai-responses",
+    provider: "azure-openai",
+    baseUrl: "",
+    reasoning: true,
+    thinkingLevelMap: {
+      none: null,
+      short: 40000,
+      medium: 80000,
+      long: 100000,
+    },
+    input: ["text", "image"],
+    cost: {
+      input: 2.5,
+      output: 15.0,
+      cacheRead: 0.25,
+      cacheWrite: 0,
+    },
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
   },
   {
     id: "gpt-5.4-mini",
@@ -219,12 +242,29 @@ const azureOpenAIModels: Model<Api>[] = [
   },
 ];
 
+function formatModelInput(input: Model<Api>["input"]): string {
+  return `[${input.map((item) => JSON.stringify(item)).join(", ")}]`;
+}
+
+const thinkingLevelKeys = ["none", "short", "medium", "long"] as const;
+
+function formatThinkingLevelMap(map: ThinkingLevelMap): string {
+  const entries = thinkingLevelKeys.flatMap((key) => {
+    const value = map[key];
+    if (value === undefined) return [];
+
+    return [`${key}: ${value === null ? "null" : value}`];
+  });
+
+  return `{ ${entries.join(", ")} }`;
+}
+
 function generateFile(models: Model<Api>[]): string {
   const modelEntries = models
     .map((m) => {
       const hasThinkingLevelMap = m.thinkingLevelMap;
       const thinkingLevelMapStr = hasThinkingLevelMap
-        ? `\n    thinkingLevelMap: ${JSON.stringify(m.thinkingLevelMap)},`
+        ? `\n    thinkingLevelMap: ${formatThinkingLevelMap(m.thinkingLevelMap)},`
         : "";
 
       return `  {
@@ -234,7 +274,7 @@ function generateFile(models: Model<Api>[]): string {
     provider: ${JSON.stringify(m.provider)},
     baseUrl: ${JSON.stringify(m.baseUrl)},
     reasoning: ${m.reasoning},${thinkingLevelMapStr}
-    input: ${JSON.stringify(m.input)},
+    input: ${formatModelInput(m.input)},
     cost: {
       input: ${m.cost.input},
       output: ${m.cost.output},
