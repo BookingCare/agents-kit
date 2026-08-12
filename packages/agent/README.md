@@ -46,6 +46,31 @@ const { messages, iterations } = await agentLoop(query, {
 
 Returns `{ messages, iterations }` — the full message history and how many loop cycles ran.
 
+## Agent Pool
+
+Use `AgentPool` to manage multiple in-memory `Agent` instances by ID.
+
+```typescript
+import { AgentPool } from "@bookingcare/agent";
+
+const pool = new AgentPool({ maxAgents: 10 });
+
+const agent = pool.create("alpha", {
+  initialState: {
+    model,
+    systemPrompt: "You are helpful.",
+    thinkingLevel: "off",
+    tools: [],
+    messages: [],
+  },
+});
+
+await agent.prompt("Hello");
+await pool.shutdown();
+```
+
+For a full serving pattern, see [docs/production.md](./docs/production.md).
+
 ## MCP Support
 
 The agent can connect to Model Context Protocol (MCP) servers and expose their tools alongside local tools.

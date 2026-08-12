@@ -18,6 +18,7 @@
 
 ### Added
 
+- `AgentPool` for managing in-memory `Agent` instances by ID with create/get/list/delete/shutdown
 - MCP (Model Context Protocol) server support with SSE and stdio transports
 - `McpRegistry` for managing multiple MCP server connections
 - JSON Schema to TypeBox adapter for MCP tool schemas (`convertJsonSchemaToTypeBox`)
